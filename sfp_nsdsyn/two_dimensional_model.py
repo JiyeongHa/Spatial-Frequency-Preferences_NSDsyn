@@ -7,7 +7,7 @@ import itertools
 from timeit import default_timer as timer
 from . import utils as utils
 from pathlib import Path
-
+import warnings
 
 def stim_w_r_and_w_a(stim_df,
                       stim_class=['pinwheel','forward spiral','annulus','reverse spiral']):
@@ -91,8 +91,10 @@ def normalize(voxel_info, to_norm, to_group=["subj", "voxel"], phase_info=False)
     if type(voxel_info) == pd.DataFrame:
         if phase_info is False:
             if all(voxel_info.groupby(to_group).size() == 28) is False:
-                raise Exception('There are more than 28 conditions for one voxel!\n')
-        normed = voxel_info.groupby(to_group)[to_norm].apply(lambda x: x / np.linalg.norm(x))
+                warnings.warn('There are more than 28 conditions for one voxel!\n')
+        tmp = voxel_info.groupby(to_group)[to_norm].apply(lambda x: x / np.linalg.norm(x)).reset_index()
+        tmp.rename(columns={to_norm: f'normed_{to_norm}'}, inplace=True)
+        normed = pd.merge(voxel_info, tmp[to_group + [f'normed_{to_norm}']], on=to_group)
 
     elif type(voxel_info) == list:
         normed = torch.empty(to_norm.shape, dtype=torch.float64)
