@@ -230,7 +230,7 @@ rule binning_nsdsyn:
         from sfp_nsdsyn import tuning
         df = pd.read_csv(input.subj_df)
         my_phase = int(wildcards.phase)
-        df = df.query('~names.str.contains("mixtures").values')
+
         df['ecc_bin'] = tuning.bin_ecc(df['eccentricity'], bin_list=params.bin_info[0], bin_labels=params.bin_info[1])
         c_df = tuning.summary_stat_for_ecc_bin(df,
                                                to_group= ['sub', 'ecc_bin', 'freq_lvl', 'names', 'vroinames'],
@@ -269,11 +269,15 @@ rule fit_tuning_curves:
         else:
             save_stim_type_name = wildcards.stim_class.replace('-',' ')
             subj_df = subj_df.query('names == @save_stim_type_name')
+        if wildcards.subj == "avg":
+            beta_col = "normed_betas"
+        else:
+            beta_col = "betas"
 
         save_ecc_bin_name = params.bin_info[1][int(wildcards.curbin)]
         subj_df = subj_df.query('ecc_bin == @save_ecc_bin_name')
         my_model = tuning.LogGaussianTuningModel()
-        my_dataset = tuning.LogGaussianTuningDataset(subj_df['local_sf'], subj_df['betas'])
+        my_dataset = tuning.LogGaussianTuningDataset(subj_df['local_sf'], subj_df[beta_col])
         loss_history, model_history = tuning.fit_tuning_curves(my_model, my_dataset,
                                                                learning_rate=float(wildcards.lr),
                                                                max_epoch=int(wildcards.max_epoch),
@@ -283,6 +287,10 @@ rule fit_tuning_curves:
         model_history.to_hdf(output.model_history, key='stage', mode='w')
         loss_history.to_hdf(output.loss_history, key='stage', mode='w')
 
+rule fit_tuning_all:
+    input:
+        expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_1D", "{dset}", 'model-params_class-{stim_class}_lr-{lr}_eph-{max_epoch}_e1-{e1}_e2-{e2}_nbin-{enum}_curbin-{curbin}_sub-{subj}_roi-{roi}_vs-{vs}.pt'),
+        subj='avg', dset='nsdsyn',  roi=ROIS, vs='pRFcenter',curbin=np.arange(0,7),enum=7, e1=0.5, e2=4, stim_class='avg', lr=LR_1D, max_epoch=MAX_EPOCH_1D)
 
 def _get_curbin(enum):
     return np.arange(0, int(enum.replace('log', '')))
