@@ -196,7 +196,6 @@ def sim_fit_1D_model(cur_df, ecc_bins="bins", n_print=1000,
 def get_bin_labels(e1, e2, enum):
     if enum == "log3":
         enum_only = enum[3:]
-        print(enum_only)
         bin_list = np.logspace(np.log2(float(e1)), np.log2(float(e2)), num=int(enum_only) + 1, base=2)
     else:
         bin_list = np.linspace(float(e1), float(e2), int(enum) + 1)
