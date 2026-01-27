@@ -169,3 +169,60 @@ def get_precision_s(df, subset):
     avg_sigma_v_df['precision'] = 1 / avg_sigma_v_df['sigma_squared_s']
     return avg_sigma_v_df[subset + ['precision']]
 
+
+def shuffle_class_idx(df, to_shuffle=['betas'],
+                      groupby_cols=['voxel', 'sub'], same_perm=False):
+    """Shuffle values across class_idx within each group (e.g., voxel).
+
+    This function performs a permutation of the specified columns across
+    different class_idx values within each group. All specified columns are
+    shuffled together (same permutation applied to all columns), which is useful
+    for permutation testing to create null distributions.
+
+    Args:
+        df: Input dataframe containing 'class_idx' column and the columns to shuffle
+        to_shuffle: List of column names whose values will be shuffled across class_idx
+            (default: ['betas'])
+        groupby_cols: List of columns to group by before shuffling (default: ['voxel', 'sub'])
+            Shuffling happens independently within each group.
+        same_perm: If True, apply the same permutation to all groups (default: False).
+            When True, all voxels will be shuffled in the same way.
+
+    Returns:
+        DataFrame with shuffled values in the specified columns
+
+    Example:
+        If a voxel originally has:
+            class_idx=0, betas=0.1, 
+            class_idx=1, betas=0.2, 
+            class_idx=2, betas=0.3, 
+        After shuffling (e.g., permutation [2,0,1]), it becomes:
+            class_idx=0, betas=0.3, 
+            class_idx=1, betas=0.1, 
+            class_idx=2, betas=0.2, 
+    """
+    df_shuffled = df.copy()
+    # Filter to only columns that exist in the dataframe
+    cols_to_shuffle = [col for col in to_shuffle if col in df_shuffled.columns]
+
+    if same_perm:
+        # Generate one permutation based on number of class_idx
+        n_classes = df['class_idx'].nunique()
+        perm_idx = np.random.permutation(n_classes)
+
+        def shuffle_within_group(group):
+            group = group.sort_values('class_idx')
+            for col in cols_to_shuffle:
+                group[col] = group[col].values[perm_idx]
+            return group
+    else:
+        def shuffle_within_group(group):
+            n_rows = len(group)
+            perm_idx = np.random.permutation(n_rows)
+            for col in cols_to_shuffle:
+                group[col] = group[col].values[perm_idx]
+            return group
+
+    df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
+    return df_shuffled
+
