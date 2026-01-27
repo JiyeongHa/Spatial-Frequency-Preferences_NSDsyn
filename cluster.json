@@ -3,7 +3,7 @@
     "nodes": 1,
     "tasks_per_node": 1,
     "mem": "8GB",
-    "time": "3-12:00:00",
+    "time": "8:00:00",
     "job_name": "{rule}.{wildcards}",
     "cpus_per_task": 1,
     "output": "{log}-%j",
@@ -12,6 +12,10 @@
     "mail_user": "jiyeong.ha@nyu.edu"
   },
   "run_model": {
+    "mem": "{resources.mem_mb}MB",
+    "cpus_per_task": "{resources.cpus_per_task}"
+  },
+    "run_model_shuffled": {
     "mem": "{resources.mem_mb}MB",
     "cpus_per_task": "{resources.cpus_per_task}"
   },

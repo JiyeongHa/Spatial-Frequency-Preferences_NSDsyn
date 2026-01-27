@@ -388,3 +388,34 @@ def calculate_confidence_intervals(df, params_list, dset_types, ci_quantiles=[0.
             dset_df[param] = [[lo, hi]]
         all_dset_df = pd.concat((all_dset_df, dset_df), axis=0)
     return all_dset_df
+
+
+def pearson_r(x, y, axis=0):
+    """Calculate Pearson correlation coefficient between two arrays.
+
+    Args:
+        x: First numpy array
+        y: Second numpy array (must have same shape as x)
+        axis: Axis along which to compute the correlation (default: 0)
+
+    Returns:
+        Pearson correlation coefficient(s). If x and y are 1D, returns a scalar.
+        If x and y are 2D, returns an array of correlations computed along the
+        specified axis.
+
+    Example:
+        >>> x = np.array([[1, 2, 3], [4, 5, 6]])
+        >>> y = np.array([[1, 2, 3], [6, 5, 4]])
+        >>> pearson_r(x, y, axis=1)  # correlations for each row
+        array([ 1., -1.])
+    """
+    x_mean = np.mean(x, axis=axis, keepdims=True)
+    y_mean = np.mean(y, axis=axis, keepdims=True)
+
+    x_centered = x - x_mean
+    y_centered = y - y_mean
+
+    numerator = np.sum(x_centered * y_centered, axis=axis)
+    denominator = np.sqrt(np.sum(x_centered**2, axis=axis) * np.sum(y_centered**2, axis=axis))
+
+    return numerator / denominator

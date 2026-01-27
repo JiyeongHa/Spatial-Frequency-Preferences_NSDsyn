@@ -170,6 +170,74 @@ def get_precision_s(df, subset):
     return avg_sigma_v_df[subset + ['precision']]
 
 
+def pooled_std(df, group_col, params=None):
+    """Calculate pooled standard deviation for two groups across multiple parameters.
+
+    The pooled standard deviation is calculated using the formula:
+        s_p = sqrt(((n1-1)*s1^2 + (n2-1)*s2^2) / (n1 + n2 - 2))
+
+    Args:
+        df: Input dataframe containing the parameter columns and a grouping column
+        group_col: Name of the column that divides the data into two groups
+        params: List of parameter column names to calculate pooled SD for.
+            If None, defaults to ['sigma', 'slope', 'intercept', 'p_1', 'p_2',
+            'p_3', 'p_4', 'A_1', 'A_2']
+
+    Returns:
+        DataFrame with one row containing the pooled SD for each parameter
+
+    Example:
+        >>> pooled_sd_df = pooled_std(final_params, group_col='dset_type')
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    groups = df[group_col].unique()
+    if len(groups) != 2:
+        raise ValueError(f"Expected exactly 2 groups, but found {len(groups)}: {groups}")
+
+    group1 = df[df[group_col] == groups[0]]
+    group2 = df[df[group_col] == groups[1]]
+
+    n1 = len(group1)
+    n2 = len(group2)
+
+    pooled_sd_values = {}
+    for param in params:
+        s1 = group1[param].std(ddof=1)
+        s2 = group2[param].std(ddof=1)
+        pooled_sd = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / (n1 + n2 - 2))
+        pooled_sd_values[param] = pooled_sd
+
+    return pd.DataFrame([pooled_sd_values])
+
+
+def standardized_mean(df, pooled_sd_df, group_col, params=None):
+    """Calculate mean of each parameter per group, divided by pooled standard deviation.
+
+    Args:
+        df: Input dataframe containing the parameter columns and a grouping column
+        pooled_sd_df: DataFrame with pooled standard deviations (output from pooled_std)
+        group_col: Name of the column that divides the data into groups
+        params: List of parameter column names. If None, defaults to
+            ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    Returns:
+        DataFrame with rows for each group, containing mean/pooled_sd for each parameter
+
+    Example:
+        >>> pooled_sd_df = pooled_std(final_params, group_col='dset_type')
+        >>> std_mean_df = standardized_mean(final_params, pooled_sd_df, group_col='dset_type')
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    group_means = df.groupby(group_col)[params].mean()
+    standardized = group_means / pooled_sd_df.iloc[0][params].values
+
+    return standardized.reset_index()
+
+
 def shuffle_class_idx(df, to_shuffle=['betas'],
                       groupby_cols=['voxel', 'sub'], same_perm=False):
     """Shuffle values across class_idx within each group (e.g., voxel).
