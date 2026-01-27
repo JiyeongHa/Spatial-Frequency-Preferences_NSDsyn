@@ -411,6 +411,8 @@ rule shuffle_df:
         precision = os.path.join(config['OUTPUT_DIR'],'dataframes','{dset}', 'precision', 'precision-v_sub-{subj}_roi-{roi}_vs-{vs}.csv')
     output:
         shuffled_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
+    log:
+        os.path.join(config['OUTPUT_DIR'], 'logs', 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_shuffle.log')
     run:
         from sfp_nsdsyn.bootstrapping import shuffle_class_idx
         np.random.seed(int(wildcards.perm))
