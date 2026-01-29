@@ -453,17 +453,10 @@ rule run_model_shuffled:
         model_history.to_hdf(output.model_history, key='stage', mode='w')
         loss_history.to_hdf(output.loss_history, key='stage', mode='w')    
 
-
-rule run_model_all:
-    input:
-        expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
-               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn')[:1], roi=['V1'], vs='pRFsize', perm=np.arange(0,100))
- 
-
 rule run_shuffle_model_all:
     input:
         expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
-               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn')[1:], roi=['V1'], vs='pRFsize', perm=np.arange(0,100))
+               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(100,1000))
  
 rule run_model:
     input:
