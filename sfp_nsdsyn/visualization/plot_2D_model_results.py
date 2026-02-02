@@ -1614,3 +1614,140 @@ def calculate_preferred_period_at_eccentricity(fit_df, eccentricity=2):
     )
     return fit_df[['Paper', 'Preferred period at eccentricity']]
 
+
+def plot_null_distribution_histogram(null_values, observed_value, 
+                                        xlabel='Correlation coefficient', 
+                                        ylabel='Frequency',
+                                        title=None,
+                                        bins=20,
+                                        figsize=(4, 3),
+                                        save_path=None):
+    """
+    Plot histogram of null distribution with observed value marked.
+    
+    Parameters
+    ----------
+    null_values : array-like
+        Array of null distribution values (e.g., permutation correlations)
+    observed_value : float
+        The observed statistic value to mark on the plot
+    xlabel : str
+        Label for x-axis
+    ylabel : str
+        Label for y-axis
+    title : str, optional
+        Title for the plot
+    bins : int
+        Number of histogram bins
+    figsize : tuple
+        Figure size (width, height)
+    save_path : str, optional
+        Path to save the figure
+        
+    Returns
+    -------
+    fig, ax : matplotlib figure and axes objects
+    """
+    sns.set_theme("paper", style='ticks', rc=rc)
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    
+    # Plot histogram
+    ax.hist(null_values, bins=bins, color='gray', alpha=0.7, edgecolor='black')
+    
+    # Mark observed value
+    ax.axvline(x=observed_value, color='red', linestyle='--', 
+                linewidth=2, label=f'Observed: {observed_value:.3f}')
+    
+    # Calculate p-value (two-tailed)
+    p_value = np.mean(np.abs(null_values) >= np.abs(observed_value))
+    
+    # Add text with p-value
+    ax.text(0.95, 0.95, f'p = {p_value:.3f}', 
+            transform=ax.transAxes, 
+            verticalalignment='top', 
+            horizontalalignment='right',
+            fontsize=rc['font.size'])
+    
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(frameon=False)
+    
+    plt.tight_layout()
+    utils.save_fig(save_path)
+    
+    return fig, ax
+
+def plot_null_parameter_distributions(null_df_melted, real_df=None, real_df_2=None,
+                                        col_wrap=3, figsize=None,
+                                        bins=20, kde=False,
+                                        save_path=None):
+    """
+    Plot histograms of null distribution for each parameter with observed values.
+    
+    Parameters
+    ----------
+    null_df_melted : pd.DataFrame
+        Melted DataFrame with columns 'parameter' and 'value'
+    real_df : pd.DataFrame, optional
+        DataFrame with real observed values, columns 'parameter' and 'value'
+    params : list, optional
+        List of parameters to plot. If None, plots all unique parameters
+    col_wrap : int
+        Number of columns in the grid
+    figsize : tuple, optional
+        Figure size (width, height)
+    bins : int
+        Number of histogram bins
+    kde : bool
+        Whether to plot kernel density estimate
+    save_path : str, optional
+        Path to save the figure
+        
+    Returns
+    -------
+    g : sns.FacetGrid
+    """
+    sns.set_theme("paper", style='ticks', rc=rc)
+    
+    plot_df = null_df_melted.copy()
+    plot_df['parameter'] = _change_params_to_math_symbols(plot_df['parameter'])
+    params = plot_df['parameter'].unique()
+    g = sns.FacetGrid(plot_df, col='parameter', col_wrap=col_wrap, 
+                        sharex=False, sharey=True, height=2, aspect=1.2)
+    g.map(sns.histplot, 'value', bins=bins, kde=kde, color='gray', alpha=0.7)
+    
+    # Add observed values as red vertical lines
+    if real_df is not None:
+        real_df['parameter'] = _change_params_to_math_symbols(real_df['parameter'])
+        for param in params:
+            if param in real_df['parameter'].values:
+                ax = g.axes_dict.get(param)
+                if ax is not None:
+                    observed_val = real_df[real_df['parameter'] == param]['value'].values[0]
+                    ax.axvline(x=observed_val, color='red', linestyle='-', 
+                                linewidth=2, label='Observed')
+                    
+    
+    # Add observed values as red vertical lines
+    if real_df_2 is not None:
+        real_df_2['parameter'] = _change_params_to_math_symbols(real_df_2['parameter'])
+        for param in params:
+            if param in real_df_2['parameter'].values:
+                ax = g.axes_dict.get(param)
+                if ax is not None:
+                    observed_val = real_df_2[real_df_2['parameter'] == param]['value'].values[0]
+                    ax.axvline(x=observed_val, color='blue', linestyle='--', 
+                                linewidth=2, label='Observed')
+    g.set_axis_labels("", "Frequency")
+    g.tight_layout()
+    
+    # Set x-axis labels to parameter names and remove titles
+    for param, ax in g.axes_dict.items():
+        ax.set_title('')
+        ax.set_xlabel(param)
+    
+    utils.save_fig(save_path)
+    
+    return g
