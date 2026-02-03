@@ -294,3 +294,82 @@ def shuffle_class_idx(df, to_shuffle=['betas'],
     df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
     return df_shuffled
 
+def calculate_mse(df, groupby, params=None, metric='mse', melt=True):
+    """
+    Calculate error metric for each group and parameter within each group.
+
+    For each group and parameter, calculates how much the group's values deviate
+    from the group's own mean (i.e., variance within each group).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing the data to analyze
+    groupby : str
+        Column name to group by (e.g., 'perm' for permutations)
+    params : list of str
+        List of column names (parameters) to calculate error metric for
+    metric : str, optional
+        Error metric to calculate. Options:
+        - 'mse': Mean Squared Error (default) - variance within group
+        - 'mae': Mean Absolute Error - mean absolute deviation within group
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns [groupby_column, 'parameter', 'value'] showing
+        error metric for each group-parameter combination
+
+    Raises
+    ------
+    ValueError
+        If metric is not 'mse' or 'mae'
+        If groupby column or value columns don't exist in df
+
+    Examples
+    --------
+    >>> df = pd.DataFrame({
+    ...     'perm': [0, 0, 1, 1],
+    ...     'sigma': [2.1, 2.2, 2.5, 2.6],
+    ...     'slope': [0.11, 0.12, 0.15, 0.16]
+    ... })
+    >>> result = calculate_permutation_metric(df, groupby='perm',
+    ...                                       value=['sigma', 'slope'],
+    ...                                       metric='mse')
+    """
+    if params is None:
+        params = [col for col in df.columns if col != groupby]
+    # Validate metric parameter
+    if metric not in ['mse', 'mae']:
+        raise ValueError(f"metric must be 'mse' or 'mae', got '{metric}'")
+
+    # Validate columns exist
+    if groupby not in df.columns:
+        raise ValueError(f"groupby column '{groupby}' not found in dataframe")
+
+    missing_cols = [col for col in params if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"value columns {missing_cols} not found in dataframe")
+
+    # Vectorized calculation using transform to broadcast group means
+    # Calculate group means for each parameter (broadcast to all rows in group)
+    group_means = df.groupby(groupby)[params].transform('mean')
+
+    # Calculate deviations from group mean
+    if metric == 'mse':
+        # Mean squared error: (x - group_mean)^2
+        errors = (df[params] - group_means) ** 2
+    elif metric == 'mae':
+        # Mean absolute error: |x - group_mean|
+        errors = (df[params] - group_means).abs()
+
+    # Calculate mean error for each group and parameter
+    result = errors.groupby(df[groupby]).mean()
+
+    # Reshape from wide to long format: [groupby, parameter, value]
+    result = result.reset_index()
+    if melt:
+        result = result.melt(id_vars=[groupby], value_vars=params,
+                            var_name='parameter', value_name='value')
+
+    return result

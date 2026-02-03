@@ -1,5 +1,4 @@
-configfile:
-    "config.json"
+configfile: "config.json"
 import os
 import sys
 sys.path.append(config['PYSURFER_DIR'])
@@ -457,7 +456,43 @@ rule run_shuffle_model_all:
     input:
         expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
                dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(100,1000))
- 
+
+rule plot_null_distribution:
+    input:
+        null_models = lambda wildcards: expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', 'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-{{roi}}_vs-{{vs}}.pt'),
+                                               perm=range(int(wildcards.n_perm)), subj=make_subj_list('nsdsyn')),
+        precision_s = os.path.join(config['OUTPUT_DIR'], 'dataframes', 'nsdsyn', 'precision', 'precision-s_dset-nsdsyn_vs-{vs}.csv')
+    output:
+        os.path.join(config['OUTPUT_DIR'], 'figures', "sfp_model", "results_2D", "nsdsyn", "perm", 'plot-null_distribution_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_roi-{roi}_vs-{vs}.png')
+    log:
+        os.path.join(config['OUTPUT_DIR'], 'logs', 'figures', "sfp_model", "results_2D", "nsdsyn", "perm", 'plot-null_distribution_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_roi-{roi}_vs-{vs}.log')
+    run:
+        from sfp_nsdsyn.bootstrapping import calculate_permutation_metric
+        import matplotlib.pyplot as plt
+
+        # Load all permutation models
+        null_nsd_params = model.load_all_models(input.null_models, *['sub', 'lr', 'eph', 'roi', 'perm'])
+
+        # Load and merge precision data
+        precision_s = pd.read_csv(input.precision_s)
+        null_nsd_df = null_nsd_params.merge(precision_s[['sub', 'vroinames', 'precision']],
+                                             on=['sub', 'vroinames'])
+        null_nsd_df['dset_type'] = null_nsd_df['vroinames'].apply(lambda x: f'Null NSD {x}')
+        null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
+
+        # Calculate MSE for each permutation and parameter
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+        null_mse_df = calculate_permutation_metric(null_nsd_df, groupby='perm',
+                                                   value=params, metric='mse')
+
+        # Create visualization
+        vis2D.plot_null_parameter_distributions(null_mse_df, value='value', real_df=None,
+                                               title='MSE of Null Model Parameters')
+
+        # Save figure
+        plt.savefig(output[0], dpi=300, bbox_inches='tight')
+        plt.close()
+
 rule run_model:
     input:
         subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'model', 'dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_tavg-False.csv'),

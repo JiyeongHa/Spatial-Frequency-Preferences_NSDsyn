@@ -1679,7 +1679,9 @@ def plot_null_distribution_histogram(null_values, observed_value,
     
     return fig, ax
 
-def plot_null_parameter_distributions(null_df_melted, real_df=None, real_df_2=None,
+def plot_null_parameter_distributions(null_df_melted, value='value',
+                                      title=None,
+                                      real_df=None, real_df_2=None,
                                         col_wrap=3, figsize=None,
                                         bins=20, kde=False,
                                         save_path=None):
@@ -1715,9 +1717,9 @@ def plot_null_parameter_distributions(null_df_melted, real_df=None, real_df_2=No
     plot_df['parameter'] = _change_params_to_math_symbols(plot_df['parameter'])
     params = plot_df['parameter'].unique()
     g = sns.FacetGrid(plot_df, col='parameter', col_wrap=col_wrap, 
+                      
                         sharex=False, sharey=True, height=2, aspect=1.2)
-    g.map(sns.histplot, 'value', bins=bins, kde=kde, color='gray', alpha=0.7)
-    
+    g.map(sns.histplot, value, bins=bins, kde=kde, color='gray', alpha=0.7)
     # Add observed values as red vertical lines
     if real_df is not None:
         real_df['parameter'] = _change_params_to_math_symbols(real_df['parameter'])
@@ -1725,7 +1727,7 @@ def plot_null_parameter_distributions(null_df_melted, real_df=None, real_df_2=No
             if param in real_df['parameter'].values:
                 ax = g.axes_dict.get(param)
                 if ax is not None:
-                    observed_val = real_df[real_df['parameter'] == param]['value'].values[0]
+                    observed_val = real_df[real_df['parameter'] == param][value].values[0]
                     ax.axvline(x=observed_val, color='red', linestyle='-', 
                                 linewidth=2, label='Observed')
                     
@@ -1737,12 +1739,13 @@ def plot_null_parameter_distributions(null_df_melted, real_df=None, real_df_2=No
             if param in real_df_2['parameter'].values:
                 ax = g.axes_dict.get(param)
                 if ax is not None:
-                    observed_val = real_df_2[real_df_2['parameter'] == param]['value'].values[0]
+                    observed_val = real_df_2[real_df_2['parameter'] == param][value].values[0]
                     ax.axvline(x=observed_val, color='blue', linestyle='--', 
                                 linewidth=2, label='Observed')
     g.set_axis_labels("", "Frequency")
     g.tight_layout()
-    
+    g.fig.suptitle(title)
+
     # Set x-axis labels to parameter names and remove titles
     for param, ax in g.axes_dict.items():
         ax.set_title('')
