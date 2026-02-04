@@ -455,7 +455,51 @@ rule run_model_shuffled:
 rule run_shuffle_model_all:
     input:
         expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
-               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(100,1000))
+               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(0,100))
+
+rule compare_mse_nsd_broderick:
+    input:
+        nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
+                            'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                            subj=make_subj_list('nsdsyn')),
+        broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
+                                  'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                                  subj=make_subj_list('broderick')),
+        null_nsd_models = lambda wc: expand(
+            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm',
+                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
+    output:
+        csv = os.path.join(config['OUTPUT_DIR'], 'sfp_model', 'results_2D', 'perm',
+                          'error_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.csv'),
+        plot = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'error_null_distribution_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png')
+    run:
+        from sfp_nsdsyn.bootstrapping import (calculate_error_per_param,
+                                              calculate_null_error_per_param_distribution,
+                                              create_error_per_param_comparison_df)
+        from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
+
+        # Load datasets
+        nsd_df = model.load_all_models(input.nsd_models, *ARGS_2D)
+        broderick_df = model.load_all_models(input.broderick_models, *ARGS_2D)
+        null_nsd_df = model.load_all_models(input.null_nsd_models, *['sub','lr','eph','roi','perm'])
+        null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
+
+        # Calculate per-parameter errors
+        actual_errors = calculate_error_per_param(nsd_df, reference=broderick_df, params=PARAMS_2D)
+        null_errors_df = calculate_null_error_per_param_distribution(null_nsd_df, broderick_df, params=PARAMS_2D)
+
+        # Save outputs
+        result_df = create_error_per_param_comparison_df(actual_errors, null_errors_df)
+        result_df.to_csv(output.csv, index=False)
+
+        vis2D.plot_null_distribution_per_param(
+            null_errors_df, actual_errors,
+            params=PARAMS_2D,
+            title=f'Null Distribution per Parameter (n={wildcards.n_perm} permutations)',
+            save_path=output.plot)
+        plt.close()
 
 rule plot_null_distribution:
     input:
@@ -467,7 +511,7 @@ rule plot_null_distribution:
     log:
         os.path.join(config['OUTPUT_DIR'], 'logs', 'figures', "sfp_model", "results_2D", "nsdsyn", "perm", 'plot-null_distribution_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_roi-{roi}_vs-{vs}.log')
     run:
-        from sfp_nsdsyn.bootstrapping import calculate_permutation_metric
+        from sfp_nsdsyn.bootstrapping import calculate_mse
         import matplotlib.pyplot as plt
 
         # Load all permutation models
@@ -482,7 +526,7 @@ rule plot_null_distribution:
 
         # Calculate MSE for each permutation and parameter
         params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
-        null_mse_df = calculate_permutation_metric(null_nsd_df, groupby='perm',
+        null_mse_df = calculate_mse(null_nsd_df, groupby='perm',
                                                    value=params, metric='mse')
 
         # Create visualization
