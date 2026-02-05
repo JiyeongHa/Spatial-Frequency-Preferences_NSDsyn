@@ -426,8 +426,6 @@ rule run_model_shuffled:
     input:
         subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv')
     output:
-        model_history = os.path.join(config['OUTPUT_DIR'],  "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
-        loss_history = os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}",'perm', 'perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
         model = os.path.join(config['OUTPUT_DIR'], "sfp_model","results_2D", "{dset}", 'perm','perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt'),
     log:
         os.path.join(config['OUTPUT_DIR'], "logs", "sfp_model","results_2D", "{dset}",'perm','perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.log'),
@@ -457,7 +455,7 @@ rule run_shuffle_model_all:
         expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
                dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(0,100))
 
-rule compare_mse_nsd_broderick:
+rule compare_mse_nsd_broderick_per_param:
     input:
         nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
                             'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
@@ -466,15 +464,18 @@ rule compare_mse_nsd_broderick:
                                   'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
                                   subj=make_subj_list('broderick')),
         null_nsd_models = lambda wc: expand(
-            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm',
+            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
                         'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
             perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
     output:
         csv = os.path.join(config['OUTPUT_DIR'], 'sfp_model', 'results_2D', 'perm',
                           'error_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.csv'),
-        plot = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
-                           'error_null_distribution_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png')
+        plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'error_null_distribution_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png'),
+        plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'error_null_distribution_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')                   
     run:
+        import matplotlib.pyplot as plt
         from sfp_nsdsyn.bootstrapping import (calculate_error_per_param,
                                               calculate_null_error_per_param_distribution,
                                               create_error_per_param_comparison_df)
@@ -494,47 +495,140 @@ rule compare_mse_nsd_broderick:
         result_df = create_error_per_param_comparison_df(actual_errors, null_errors_df)
         result_df.to_csv(output.csv, index=False)
 
-        vis2D.plot_null_distribution_per_param(
+        fig, _ = vis2D.plot_null_distribution_per_param(
             null_errors_df, actual_errors,
             params=PARAMS_2D,
-            title=f'Null Distribution per Parameter (n={wildcards.n_perm} permutations)',
-            save_path=output.plot)
+            title=f'NSD V1: Null Distribution of MSE\nwith Broderick et al. V1',
+            bins=100,
+            logscale=True,
+            save_path=output.plot1)
+        fig.savefig(output.plot2, bbox_inches='tight', transparent=True)
         plt.close()
 
-rule plot_null_distribution:
+rule compare_standardized_metrics_nsd_broderick:
+    """Calculate MSE and correlation across all parameters after standardization by pooled SD.
+
+    This rule:
+    1. Calculates pooled SD from actual NSD + Broderick combined data
+    2. Standardizes both datasets and calculates MSE and correlation between standardized means
+    3. For each null permutation, applies the same pooled SD and calculates both metrics
+    4. Outputs both MSE and correlation values per permutation + actual observed values
+    """
     input:
-        null_models = lambda wildcards: expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', 'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-{{roi}}_vs-{{vs}}.pt'),
-                                               perm=range(int(wildcards.n_perm)), subj=make_subj_list('nsdsyn')),
-        precision_s = os.path.join(config['OUTPUT_DIR'], 'dataframes', 'nsdsyn', 'precision', 'precision-s_dset-nsdsyn_vs-{vs}.csv')
+        nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
+                            'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                            subj=make_subj_list('nsdsyn')),
+        broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
+                                  'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                                  subj=make_subj_list('broderick')),
+        null_nsd_models = lambda wc: expand(
+            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
+                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
     output:
-        os.path.join(config['OUTPUT_DIR'], 'figures', "sfp_model", "results_2D", "nsdsyn", "perm", 'plot-null_distribution_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_roi-{roi}_vs-{vs}.png')
-    log:
-        os.path.join(config['OUTPUT_DIR'], 'logs', 'figures', "sfp_model", "results_2D", "nsdsyn", "perm", 'plot-null_distribution_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_roi-{roi}_vs-{vs}.log')
+        csv = os.path.join(config['OUTPUT_DIR'], 'sfp_model', 'results_2D', 'perm',
+                          'standardized_metrics_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.csv'),
+        plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'standardized_metrics_null_distribution_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png'),
+        plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'standardized_metrics_null_distribution_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')
     run:
-        from sfp_nsdsyn.bootstrapping import calculate_mse
         import matplotlib.pyplot as plt
+        from sfp_nsdsyn.bootstrapping import (calculate_standardized_metric_comparison,
+                                              create_metric_comparison_df)
+        from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
 
-        # Load all permutation models
-        null_nsd_params = model.load_all_models(input.null_models, *['sub', 'lr', 'eph', 'roi', 'perm'])
-
-        # Load and merge precision data
-        precision_s = pd.read_csv(input.precision_s)
-        null_nsd_df = null_nsd_params.merge(precision_s[['sub', 'vroinames', 'precision']],
-                                             on=['sub', 'vroinames'])
-        null_nsd_df['dset_type'] = null_nsd_df['vroinames'].apply(lambda x: f'Null NSD {x}')
+        # Load datasets
+        nsd_df = model.load_all_models(input.nsd_models, *ARGS_2D)
+        broderick_df = model.load_all_models(input.broderick_models, *ARGS_2D)
+        null_nsd_df = model.load_all_models(input.null_nsd_models, *['sub','lr','eph','roi','perm'])
         null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
 
-        # Calculate MSE for each permutation and parameter
-        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
-        null_mse_df = calculate_mse(null_nsd_df, groupby='perm',
-                                                   value=params, metric='mse')
+        # Calculate both standardized MSE and correlation
+        (actual_mse, actual_corr), null_result_list = calculate_standardized_metric_comparison(
+            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D, metric='both')
 
-        # Create visualization
-        vis2D.plot_null_parameter_distributions(null_mse_df, value='value', real_df=None,
-                                               title='MSE of Null Model Parameters')
+        # Save outputs with both metrics
+        result_df = create_metric_comparison_df((actual_mse, actual_corr), null_result_list, metric='both')
+        result_df.to_csv(output.csv, index=False)
 
-        # Save figure
-        plt.savefig(output[0], dpi=300, bbox_inches='tight')
+        # Extract null values for each metric
+        null_mse_values = [d['mse'] for d in null_result_list]
+        null_corr_values = [d['corr'] for d in null_result_list]
+
+        # Create combined visualization (save both PNG and SVG)
+        fig, axes = vis2D.plot_null_distribution_comparison(
+            null_mse_values, actual_mse,
+            null_corr_values, actual_corr,
+            title=f'NSD V1: Null Distribution of normalized MSE and Correlation\n with Broderick et al. V1',
+            save_path=output.plot1)
+        plt.close()
+        fig, axes = vis2D.plot_null_distribution_comparison(
+            null_mse_values, actual_mse,
+            null_corr_values, actual_corr,
+            title=f'NSD V1: Null Distribution of normalized MSE and Correlation\n with Broderick et al. V1',
+            save_path=output.plot2)
+
+rule plot_combined_error_mse_comparison:
+    """Plot combined per-parameter error histograms and standardized MSE in one figure."""
+    input:
+        nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
+                            'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                            subj=make_subj_list('nsdsyn')),
+        broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
+                                  'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                                  subj=make_subj_list('broderick')),
+        null_nsd_models = lambda wc: expand(
+            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
+                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
+    output:
+        plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png'),
+        plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')
+    run:
+        import matplotlib.pyplot as plt
+        from sfp_nsdsyn.bootstrapping import (calculate_error_per_param,
+                                              calculate_null_error_per_param_distribution,
+                                              calculate_standardized_metric_comparison)
+        from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
+
+        # Load datasets
+        nsd_df = model.load_all_models(input.nsd_models, *ARGS_2D)
+        broderick_df = model.load_all_models(input.broderick_models, *ARGS_2D)
+        null_nsd_df = model.load_all_models(input.null_nsd_models, *['sub','lr','eph','roi','perm'])
+        null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
+
+        # Calculate per-parameter errors
+        actual_errors = calculate_error_per_param(nsd_df, reference=broderick_df, params=PARAMS_2D)
+        null_errors_df = calculate_null_error_per_param_distribution(null_nsd_df, broderick_df, params=PARAMS_2D)
+
+        # Calculate standardized MSE
+        (actual_mse, _), null_result_list = calculate_standardized_metric_comparison(
+            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D, metric='both')
+        null_mse_values = [d['mse'] for d in null_result_list]
+
+        # Parameter order as specified
+        params_ordered = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+
+        # Create combined plot
+        fig, _ = vis2D.plot_combined_null_distributions(
+            null_errors_df, actual_errors,
+            null_mse_values, actual_mse,
+            params=params_ordered,
+        title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
+            bins=100,
+            save_path=output.plot1)
+        plt.close()
+
+        fig, _ = vis2D.plot_combined_null_distributions(
+            null_errors_df, actual_errors,
+            null_mse_values, actual_mse,
+            params=params_ordered,
+            title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
+            bins=100,
+            save_path=output.plot2)
         plt.close()
 
 rule run_model:
