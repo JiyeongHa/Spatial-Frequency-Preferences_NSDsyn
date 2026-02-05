@@ -294,31 +294,102 @@ def shuffle_class_idx(df, to_shuffle=['betas'],
     df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
     return df_shuffled
 
-def calculate_mse(df, groupby, params=None, metric='mse', melt=True):
+def calculate_error_per_param(df, reference, params=None, metric='mse'):
     """
-    Calculate error metric for each group and parameter within each group.
+    Calculate error metric for each parameter between two dataframes.
 
-    For each group and parameter, calculates how much the group's values deviate
-    from the group's own mean (i.e., variance within each group).
+    Compares the mean of each parameter in df against the mean in reference.
 
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame containing the data to analyze
-    groupby : str
-        Column name to group by (e.g., 'perm' for permutations)
-    params : list of str
-        List of column names (parameters) to calculate error metric for
+    reference : pd.DataFrame
+        Reference dataset to compare against
+    params : list of str, optional
+        List of column names (parameters) to calculate error metric for.
+        Defaults to 9 standard model parameters.
     metric : str, optional
         Error metric to calculate. Options:
-        - 'mse': Mean Squared Error (default) - variance within group
-        - 'mae': Mean Absolute Error - mean absolute deviation within group
+        - 'mse': Mean Squared Error (default)
+        - 'mae': Mean Absolute Error
 
     Returns
     -------
     pd.DataFrame
-        DataFrame with columns [groupby_column, 'parameter', 'value'] showing
-        error metric for each group-parameter combination
+        Single-row DataFrame with error value for each parameter as columns
+
+    Raises
+    ------
+    ValueError
+        If metric is not 'mse' or 'mae'
+        If params don't exist in df or reference
+
+    Examples
+    --------
+    >>> df1 = pd.DataFrame({'sigma': [2, 4], 'slope': [1, 3]})
+    >>> df2 = pd.DataFrame({'sigma': [5, 7], 'slope': [4, 6]})
+    >>> calculate_error_per_param(df1, df2, params=['sigma', 'slope'])
+       sigma  slope
+    0    9.0    9.0
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    if metric not in ['mse', 'mae']:
+        raise ValueError(f"metric must be 'mse' or 'mae', got '{metric}'")
+
+    missing_df = [p for p in params if p not in df.columns]
+    missing_ref = [p for p in params if p not in reference.columns]
+    if missing_df:
+        raise ValueError(f"Parameters {missing_df} not found in df")
+    if missing_ref:
+        raise ValueError(f"Parameters {missing_ref} not found in reference")
+
+    df_means = df[params].mean().values
+    ref_means = reference[params].mean().values
+
+    if metric == 'mse':
+        errors = (df_means - ref_means) ** 2
+    else:  # mae
+        errors = np.abs(df_means - ref_means)
+
+    return pd.DataFrame([errors], columns=params)
+
+
+def calculate_mse(df, groupby=None, params=None, metric='mse', melt=True, reference=None):
+    """
+    Calculate error metric for groups/parameters.
+
+    Two modes:
+    1. Within-group (reference=None): Calculates variance within each group
+    2. Between-group (reference=df): Calculates MSE between df means and reference means
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing the data to analyze
+    groupby : str, optional
+        Column name to group by (e.g., 'perm' for permutations).
+        Required when reference=None.
+    params : list of str
+        List of column names (parameters) to calculate error metric for.
+        Defaults to 9 standard model parameters.
+    metric : str, optional
+        Error metric to calculate. Options:
+        - 'mse': Mean Squared Error (default)
+        - 'mae': Mean Absolute Error
+    melt : bool, optional
+        If True, return long format (only for within-group mode)
+    reference : pd.DataFrame, optional
+        Reference dataset for between-group comparison. When provided,
+        calculates MSE between df's parameter means and reference's means.
+
+    Returns
+    -------
+    float or pd.DataFrame
+        - If reference is provided: single MSE/MAE value (float)
+        - If reference is None: DataFrame with error per group/parameter
 
     Raises
     ------
@@ -328,48 +399,332 @@ def calculate_mse(df, groupby, params=None, metric='mse', melt=True):
 
     Examples
     --------
+    >>> # Between-group mode
+    >>> df1 = pd.DataFrame({'sigma': [2, 4], 'slope': [1, 3]})
+    >>> df2 = pd.DataFrame({'sigma': [5, 7], 'slope': [4, 6]})
+    >>> calculate_mse(df1, reference=df2, params=['sigma', 'slope'])
+    9.0
+
+    >>> # Within-group mode
     >>> df = pd.DataFrame({
     ...     'perm': [0, 0, 1, 1],
     ...     'sigma': [2.1, 2.2, 2.5, 2.6],
     ...     'slope': [0.11, 0.12, 0.15, 0.16]
     ... })
-    >>> result = calculate_permutation_metric(df, groupby='perm',
-    ...                                       value=['sigma', 'slope'],
-    ...                                       metric='mse')
+    >>> result = calculate_mse(df, groupby='perm', params=['sigma', 'slope'])
     """
     if params is None:
-        params = [col for col in df.columns if col != groupby]
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
     # Validate metric parameter
     if metric not in ['mse', 'mae']:
         raise ValueError(f"metric must be 'mse' or 'mae', got '{metric}'")
 
-    # Validate columns exist
+    # BETWEEN-GROUP MODE: Compare df means to reference means
+    if reference is not None:
+        errors_per_param = calculate_error_per_param(df, reference, params=params, metric=metric)
+        return errors_per_param.values.mean()
+
+    # WITHIN-GROUP MODE: Original behavior (variance within groups)
+    if groupby is None:
+        raise ValueError("groupby is required when reference is None")
     if groupby not in df.columns:
         raise ValueError(f"groupby column '{groupby}' not found in dataframe")
 
     missing_cols = [col for col in params if col not in df.columns]
     if missing_cols:
-        raise ValueError(f"value columns {missing_cols} not found in dataframe")
+        raise ValueError(f"Parameters {missing_cols} not found in dataframe")
 
     # Vectorized calculation using transform to broadcast group means
-    # Calculate group means for each parameter (broadcast to all rows in group)
     group_means = df.groupby(groupby)[params].transform('mean')
 
-    # Calculate deviations from group mean
     if metric == 'mse':
-        # Mean squared error: (x - group_mean)^2
         errors = (df[params] - group_means) ** 2
-    elif metric == 'mae':
-        # Mean absolute error: |x - group_mean|
+    else:  # mae
         errors = (df[params] - group_means).abs()
 
-    # Calculate mean error for each group and parameter
     result = errors.groupby(df[groupby]).mean()
-
-    # Reshape from wide to long format: [groupby, parameter, value]
     result = result.reset_index()
+
     if melt:
         result = result.melt(id_vars=[groupby], value_vars=params,
                             var_name='parameter', value_name='value')
 
     return result
+
+
+def calculate_null_mse_distribution(null_df, reference_df, perm_col='perm', params=None):
+    """
+    Calculate MSE for each permutation in null distribution.
+
+    Parameters
+    ----------
+    null_df : pd.DataFrame
+        DataFrame containing null data with permutation column
+    reference_df : pd.DataFrame
+        Reference dataset to compare against
+    perm_col : str
+        Column name containing permutation indices
+    params : list of str, optional
+        Parameter columns. Defaults to 9 standard params.
+
+    Returns
+    -------
+    list of dict
+        List with {'perm': int, 'mse': float} for each permutation
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    null_mse_list = []
+    for p in null_df[perm_col].unique():
+        perm_df = null_df[null_df[perm_col] == p]
+        mse = calculate_mse(perm_df, reference=reference_df, params=params)
+        null_mse_list.append({perm_col: int(p), 'mse': mse})
+
+    return null_mse_list
+
+
+def create_metric_comparison_df(actual_values, null_result_list, metric='both'):
+    """
+    Create DataFrame with actual and null distribution metric values.
+
+    Parameters
+    ----------
+    actual_values : float or tuple
+        If metric='mse' or 'corr': single float value
+        If metric='both': tuple of (actual_mse, actual_corr)
+    null_result_list : list of dict
+        List with dicts containing 'perm' and metric value(s) for each null permutation
+    metric : str
+        Which metric(s): 'mse', 'corr', or 'both'
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns [perm, mse/corr, type]
+        - perm=-1 for actual, 0+ for null permutations
+        - type='actual' or 'null'
+    """
+    result_df = pd.DataFrame(null_result_list)
+    result_df['type'] = 'null'
+
+    if metric == 'mse':
+        actual_row = pd.DataFrame([{'perm': -1, 'mse': actual_values, 'type': 'actual'}])
+    elif metric == 'corr':
+        actual_row = pd.DataFrame([{'perm': -1, 'corr': actual_values, 'type': 'actual'}])
+    else:  # metric == 'both'
+        actual_mse, actual_corr = actual_values
+        actual_row = pd.DataFrame([{'perm': -1, 'mse': actual_mse, 'corr': actual_corr, 'type': 'actual'}])
+
+    return pd.concat([actual_row, result_df], ignore_index=True)
+
+
+# Backward compatible alias
+def create_mse_comparison_df(actual_mse, null_mse_list):
+    """Backward compatible wrapper. See create_metric_comparison_df."""
+    return create_metric_comparison_df(actual_mse, null_mse_list, metric='mse')
+
+
+def calculate_null_error_per_param_distribution(null_df, reference_df, perm_col='perm', params=None, metric='mse'):
+    """
+    Calculate per-parameter error for each permutation in null distribution.
+
+    Parameters
+    ----------
+    null_df : pd.DataFrame
+        DataFrame containing null data with permutation column
+    reference_df : pd.DataFrame
+        Reference dataset to compare against
+    perm_col : str
+        Column name containing permutation indices
+    params : list of str, optional
+        Parameter columns. Defaults to 9 standard params.
+    metric : str, optional
+        Error metric: 'mse' or 'mae'. Default 'mse'.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns [perm, param1, param2, ...] containing
+        error values for each parameter per permutation
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    results = []
+    for p in null_df[perm_col].unique():
+        perm_df = null_df[null_df[perm_col] == p]
+        error_df = calculate_error_per_param(perm_df, reference_df, params=params, metric=metric)
+        error_df[perm_col] = int(p)
+        results.append(error_df)
+
+    return pd.concat(results, ignore_index=True)
+
+
+def create_error_per_param_comparison_df(actual_errors, null_errors_df, perm_col='perm'):
+    """
+    Create DataFrame with actual and null per-parameter errors.
+
+    Parameters
+    ----------
+    actual_errors : pd.DataFrame
+        Single-row DataFrame with error for each parameter
+    null_errors_df : pd.DataFrame
+        DataFrame with per-parameter errors for each permutation
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns [perm, param1, param2, ..., type]
+        - perm=-1 for actual, 0+ for null permutations
+        - type='actual' or 'null'
+    """
+    null_errors_df = null_errors_df.copy()
+    null_errors_df['type'] = 'null'
+
+    actual_errors = actual_errors.copy()
+    actual_errors[perm_col] = -1
+    actual_errors['type'] = 'actual'
+
+    return pd.concat([actual_errors, null_errors_df], ignore_index=True)
+
+
+def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
+                                              nsd_dset_type='NSD V1',
+                                              broderick_dset_type='Broderick et al. V1',
+                                              null_dset_type='Null NSD V1',
+                                              perm_col='perm', params=None,
+                                              metric='both'):
+    """
+    Calculate MSE and/or correlation between NSD and Broderick data after standardization.
+
+    This function:
+    1. Calculates pooled SD from actual NSD + Broderick combined data
+    2. Standardizes both datasets by dividing by pooled SD
+    3. Calculates MSE and/or correlation between standardized means (combining all 9 parameters)
+    4. For each null permutation, applies the same pooled SD and calculates the metric(s)
+
+    Parameters
+    ----------
+    nsd_df : pd.DataFrame
+        NSD dataset with 'dset_type' column
+    broderick_df : pd.DataFrame
+        Broderick dataset with 'dset_type' column
+    null_nsd_df : pd.DataFrame
+        Null NSD dataset with 'dset_type' and 'perm' columns
+    nsd_dset_type : str
+        Value in 'dset_type' column for NSD data (default: 'NSD V1')
+    broderick_dset_type : str
+        Value in 'dset_type' column for Broderick data (default: 'Broderick et al. V1')
+    null_dset_type : str
+        Value in 'dset_type' column for null NSD data (default: 'Null NSD V1')
+    perm_col : str
+        Column name containing permutation indices (default: 'perm')
+    params : list of str, optional
+        Parameter columns. Defaults to 9 standard params.
+    metric : str, optional
+        Which metric(s) to calculate. Options:
+        - 'mse': Mean Squared Error only
+        - 'corr': Pearson correlation only
+        - 'both': Both MSE and correlation (default)
+
+    Returns
+    -------
+    tuple
+        If metric='mse': (actual_mse: float, null_mse_list: list of dict)
+        If metric='corr': (actual_corr: float, null_corr_list: list of dict)
+        If metric='both': ((actual_mse, actual_corr): tuple, null_result_list: list of dict)
+            - null_result_list contains dicts with keys: 'perm', 'mse', 'corr'
+
+    Example
+    -------
+    >>> # Get both metrics
+    >>> (actual_mse, actual_corr), null_list = calculate_standardized_metric_comparison(
+    ...     nsd_df, broderick_df, null_nsd_df, metric='both')
+    >>> print(f"Actual MSE: {actual_mse:.4f}, Actual Corr: {actual_corr:.4f}")
+
+    >>> # Get MSE only (backward compatible)
+    >>> actual_mse, null_mse_list = calculate_standardized_metric_comparison(
+    ...     nsd_df, broderick_df, null_nsd_df, metric='mse')
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    # Validate metric parameter
+    if metric not in ['mse', 'corr', 'both']:
+        raise ValueError(f"metric must be 'mse', 'corr', or 'both', got '{metric}'")
+
+    # Step 1: Set up dset_type columns
+    nsd_df = nsd_df.copy()
+    broderick_df = broderick_df.copy()
+    null_nsd_df = null_nsd_df.copy()
+
+    nsd_df['dset_type'] = nsd_dset_type
+    broderick_df['dset_type'] = broderick_dset_type
+    null_nsd_df['dset_type'] = null_dset_type
+
+    # Step 2: Calculate pooled SD from actual NSD + Broderick combined
+    actual_combined = pd.concat([nsd_df, broderick_df], axis=0)
+    pooled_sd_df = pooled_std(actual_combined, group_col='dset_type', params=params)
+
+    # Step 3: Calculate standardized means for actual data
+    standardized_actual = standardized_mean(actual_combined, pooled_sd_df, group_col='dset_type', params=params)
+
+    # Step 4: Extract standardized means as 1D arrays
+    nsd_std_means = standardized_actual[standardized_actual['dset_type'] == nsd_dset_type][params].values.squeeze()
+    broderick_std_means = standardized_actual[standardized_actual['dset_type'] == broderick_dset_type][params].values.squeeze()
+
+    # Calculate actual metrics
+    actual_mse = np.mean((nsd_std_means - broderick_std_means) ** 2)
+    actual_corr = utils.pearson_r(nsd_std_means, broderick_std_means)
+
+    # Step 5: Calculate standardized means for ALL null permutations at once (vectorized)
+    standardized_null = standardized_mean(null_nsd_df, pooled_sd_df,
+                                          group_col=['dset_type', perm_col], params=params)
+
+    # Step 6: Calculate metrics for each permutation using vectorized operations
+    # Extract null standardized means as array (n_perms x n_params)
+    null_std_array = standardized_null[params].values  # shape: (n_perms, n_params)
+
+    # MSE: broderick_std_means is constant, broadcast subtraction across all permutations
+    diff_squared = (null_std_array - broderick_std_means) ** 2  # shape: (n_perms, n_params)
+    null_mse_array = np.mean(diff_squared, axis=1)  # shape: (n_perms,)
+
+    # Correlation: compute row-wise correlation with broderick_std_means
+    # Broadcast broderick_std_means to match null_std_array shape
+    broderick_std_means_broadcasted = np.broadcast_to(broderick_std_means, null_std_array.shape)  # shape: (n_perms, n_params)
+    null_corr_array = utils.pearson_r(null_std_array, broderick_std_means_broadcasted, axis=1)  # shape: (n_perms,)
+
+    # Get permutation indices in same order as standardized_null
+    perm_indices = standardized_null[perm_col].values
+
+    # Create output based on metric parameter
+    if metric == 'mse':
+        null_result_list = [{perm_col: int(p), 'mse': mse}
+                            for p, mse in zip(perm_indices, null_mse_array)]
+        return actual_mse, null_result_list
+    elif metric == 'corr':
+        null_result_list = [{perm_col: int(p), 'corr': corr}
+                            for p, corr in zip(perm_indices, null_corr_array)]
+        return actual_corr, null_result_list
+    else:  # metric == 'both'
+        null_result_list = [{perm_col: int(p), 'mse': mse, 'corr': corr}
+                            for p, mse, corr in zip(perm_indices, null_mse_array, null_corr_array)]
+        return (actual_mse, actual_corr), null_result_list
+
+
+# Backward compatible alias
+def calculate_standardized_mse_comparison(nsd_df, broderick_df, null_nsd_df,
+                                          nsd_dset_type='NSD V1',
+                                          broderick_dset_type='Broderick et al. V1',
+                                          null_dset_type='Null NSD V1',
+                                          perm_col='perm', params=None):
+    """Backward compatible wrapper. See calculate_standardized_metric_comparison."""
+    return calculate_standardized_metric_comparison(
+        nsd_df, broderick_df, null_nsd_df,
+        nsd_dset_type=nsd_dset_type,
+        broderick_dset_type=broderick_dset_type,
+        null_dset_type=null_dset_type,
+        perm_col=perm_col, params=params,
+        metric='mse')
