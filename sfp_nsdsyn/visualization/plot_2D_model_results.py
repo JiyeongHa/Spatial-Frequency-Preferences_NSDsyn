@@ -120,16 +120,18 @@ import numpy as np
 from seaborn.algorithms import bootstrap  # works in 0.11–0.13
 
 def _change_params_to_math_symbols(params_col):
-    params_col = params_col.replace({'sigma': r"$\sigma$",
-                                     'slope': r"$Slope$" "\n" r"$m$",
-                                     'intercept': r"$Intercept$" "\n" r"$b$",
-                                     'p_1': r"$p_1$",
-                                     'p_2': r"$p_2$",
-                                     'p_3': r"$p_3$",
-                                     'p_4': r"$p_4$",
-                                     'A_1': r"$A_1$",
-                                     'A_2': r"$A_2$"})
-    return params_col
+    mapping = {'sigma': r"$Bandwidth$" "\n" r"$\sigma$",
+               'slope': r"$Slope$" "\n" r"$m$",
+               'intercept': r"$Intercept$" "\n" r"$b$",
+               'p_1': r"$p_1$",
+               'p_2': r"$p_2$",
+               'p_3': r"$p_3$",
+               'p_4': r"$p_4$",
+               'A_1': r"$A_1$",
+               'A_2': r"$A_2$"}
+    if isinstance(params_col, list):
+        return [mapping.get(p, p) for p in params_col]
+    return params_col.replace(mapping)
 
 
 
@@ -1616,11 +1618,11 @@ def calculate_preferred_period_at_eccentricity(fit_df, eccentricity=2):
 
 
 def plot_null_distribution_histogram(null_values, observed_value, 
-                                        xlabel='Correlation coefficient', 
-                                        ylabel='Frequency',
+                                        xlabel='Mean Squared Error (MSE)', 
+                                        ylabel='Probability',
                                         title=None,
-                                        bins=20,
-                                        figsize=(4, 3),
+                                        bins=30, logscale=True,
+                                        figsize=(3.5, 3),
                                         save_path=None):
     """
     Plot histogram of null distribution with observed value marked.
@@ -1650,107 +1652,349 @@ def plot_null_distribution_histogram(null_values, observed_value,
     """
     sns.set_theme("paper", style='ticks', rc=rc)
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    
+    weights = np.ones_like(null_values) / len(null_values)
+
+    # Compute bin edges
+    if logscale:
+        # Use log-spaced bins for uniform appearance on log scale
+        null_values = np.array(null_values)
+        min_val = null_values[null_values > 0].min()
+        max_val = null_values.max()
+        bin_edges = np.geomspace(min_val, max_val, bins + 1)
+        ax.set_xscale('log', base=10)
+    else:
+        bin_edges = bins
     # Plot histogram
-    ax.hist(null_values, bins=bins, color='gray', alpha=0.7, edgecolor='black')
-    
+    ax.hist(null_values, bins=bin_edges, color='gray', alpha=0.7, edgecolor='black', weights=weights)
     # Mark observed value
     ax.axvline(x=observed_value, color='red', linestyle='--', 
                 linewidth=2, label=f'Observed: {observed_value:.3f}')
     
-    # Calculate p-value (two-tailed)
-    p_value = np.mean(np.abs(null_values) >= np.abs(observed_value))
-    
-    # Add text with p-value
-    ax.text(0.95, 0.95, f'p = {p_value:.3f}', 
-            transform=ax.transAxes, 
-            verticalalignment='top', 
-            horizontalalignment='right',
-            fontsize=rc['font.size'])
-    
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if title is not None:
-        ax.set_title(title)
-    ax.legend(frameon=False)
-    
-    plt.tight_layout()
+        ax.set_title(title, pad=15)
+    ax.legend(bbox_to_anchor=(0.8,0.9), 
+                loc='upper left', 
+                frameon=False)
     utils.save_fig(save_path)
-    
     return fig, ax
 
-def plot_null_parameter_distributions(null_df_melted, value='value',
-                                      title=None,
-                                      real_df=None, real_df_2=None,
-                                        col_wrap=3, figsize=None,
-                                        bins=20, kde=False,
-                                        save_path=None):
+
+def plot_null_distribution_comparison(null_mse_values, actual_mse,
+                                       null_corr_values, actual_corr,
+                                       title=None, figsize=(7, 3.5),
+                                       bins=50, save_path=None):
     """
-    Plot histograms of null distribution for each parameter with observed values.
-    
+    Plot MSE and correlation null distributions side-by-side.
+
     Parameters
     ----------
-    null_df_melted : pd.DataFrame
-        Melted DataFrame with columns 'parameter' and 'value'
-    real_df : pd.DataFrame, optional
-        DataFrame with real observed values, columns 'parameter' and 'value'
-    params : list, optional
-        List of parameters to plot. If None, plots all unique parameters
-    col_wrap : int
-        Number of columns in the grid
-    figsize : tuple, optional
+    null_mse_values : array-like
+        Array of null distribution MSE values
+    actual_mse : float
+        The observed MSE value to mark on the plot
+    null_corr_values : array-like
+        Array of null distribution correlation values
+    actual_corr : float
+        The observed correlation value to mark on the plot
+    title : str, optional
+        Overall title for the figure
+    figsize : tuple
         Figure size (width, height)
     bins : int
         Number of histogram bins
-    kde : bool
-        Whether to plot kernel density estimate
     save_path : str, optional
         Path to save the figure
-        
+
     Returns
     -------
-    g : sns.FacetGrid
+    fig, axes : matplotlib figure and axes objects
     """
+    rc.update({
+        'legend.fontsize': 9
+    })
     sns.set_theme("paper", style='ticks', rc=rc)
-    
-    plot_df = null_df_melted.copy()
-    plot_df['parameter'] = _change_params_to_math_symbols(plot_df['parameter'])
-    params = plot_df['parameter'].unique()
-    g = sns.FacetGrid(plot_df, col='parameter', col_wrap=col_wrap, 
-                      
-                        sharex=False, sharey=True, height=2, aspect=1.2)
-    g.map(sns.histplot, value, bins=bins, kde=kde, color='gray', alpha=0.7)
-    # Add observed values as red vertical lines
-    if real_df is not None:
-        real_df['parameter'] = _change_params_to_math_symbols(real_df['parameter'])
-        for param in params:
-            if param in real_df['parameter'].values:
-                ax = g.axes_dict.get(param)
-                if ax is not None:
-                    observed_val = real_df[real_df['parameter'] == param][value].values[0]
-                    ax.axvline(x=observed_val, color='red', linestyle='-', 
-                                linewidth=2, label='Observed')
-                    
-    
-    # Add observed values as red vertical lines
-    if real_df_2 is not None:
-        real_df_2['parameter'] = _change_params_to_math_symbols(real_df_2['parameter'])
-        for param in params:
-            if param in real_df_2['parameter'].values:
-                ax = g.axes_dict.get(param)
-                if ax is not None:
-                    observed_val = real_df_2[real_df_2['parameter'] == param][value].values[0]
-                    ax.axvline(x=observed_val, color='blue', linestyle='--', 
-                                linewidth=2, label='Observed')
-    g.set_axis_labels("", "Frequency")
-    g.tight_layout()
-    g.fig.suptitle(title)
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    # Set x-axis labels to parameter names and remove titles
-    for param, ax in g.axes_dict.items():
-        ax.set_title('')
-        ax.set_xlabel(param)
-    
+    # Convert to numpy arrays
+    null_mse_values = np.array(null_mse_values)
+    null_corr_values = np.array(null_corr_values)
+
+    # Calculate p-values
+    p_mse = np.mean(null_mse_values <= actual_mse)
+    p_corr = np.mean(null_corr_values >= actual_corr)
+
+    # ---- Left subplot: MSE (log scale) ----
+    ax_mse = axes[0]
+    weights_mse = np.ones_like(null_mse_values) / len(null_mse_values)
+
+    # Use log-spaced bins for MSE
+    min_val = null_mse_values[null_mse_values > 0].min()
+    max_val = null_mse_values.max()
+    bin_edges_mse = np.geomspace(min_val, max_val, bins + 1)
+    ax_mse.set_xscale('log', base=10)
+
+    ax_mse.hist(null_mse_values, bins=bin_edges_mse, color='gray', alpha=0.7,
+                edgecolor='black', weights=weights_mse)
+    ax_mse.axvline(x=actual_mse, color='red', linestyle='--', linewidth=2,
+                   label=f'Observed: {actual_mse:.2f}')
+    #ax_mse.set_xlabel('Standardized MSE')
+    ax_mse.set_ylabel('Probability')
+    ax_mse.set_title(f'Mean Squared Error (MSE)')
+    ax_mse.legend(bbox_to_anchor=(0.6, 0.99), loc='upper right', frameon=False)
+
+    # ---- Right subplot: Correlation (linear scale) ----
+    ax_corr = axes[1]
+    weights_corr = np.ones_like(null_corr_values) / len(null_corr_values)
+
+    ax_corr.hist(null_corr_values, bins=bins, color='gray', alpha=0.7,
+                 edgecolor='black', weights=weights_corr)
+    ax_corr.axvline(x=actual_corr, color='red', linestyle='--', linewidth=2,
+                    label=f'Observed: {actual_corr:.2f}')
+    #ax_corr.set_xlabel('Correlation (r)')
+    ax_corr.set_ylabel('Probability')
+    ax_corr.set_title(f'Correlation ($\mathit{{r}}$)')
+    ax_corr.legend(bbox_to_anchor=(0.05, 0.99), loc='upper left', frameon=False)
+    ax_corr.set(xticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    if title is not None:
+        fig.suptitle(title, y=1.0)
+    fig.subplots_adjust(wspace=0.4)
+    plt.tight_layout()
     utils.save_fig(save_path)
-    
-    return g
+    return fig, axes
+
+
+def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
+                                     col_wrap=3, figsize=None, bins=20, logscale=True,
+                                     log_bins=True, title=None, save_path=None):
+    """
+    Plot histograms of null distribution for each parameter error with observed values.
+
+    Parameters
+    ----------
+    null_errors_df : pd.DataFrame
+        DataFrame with per-parameter error values for each permutation.
+        Columns should include parameter names (e.g., sigma, slope, etc.)
+    actual_errors : pd.DataFrame
+        Single-row DataFrame with actual error for each parameter
+    params : list of str, optional
+        Parameters to plot. Defaults to 9 standard params.
+    col_wrap : int
+        Number of columns in the subplot grid
+    figsize : tuple, optional
+        Figure size (width, height). Auto-calculated if None.
+    bins : int
+        Number of histogram bins
+    logscale : bool
+        If True, use log scale on x-axis
+    log_bins : bool, optional
+        If True, use logarithmically-spaced bins (uniform on log scale).
+        Defaults to True when logscale=True, False otherwise.
+    title : str, optional
+        Suptitle for the figure
+    save_path : str, optional
+        Path to save the figure
+
+    Returns
+    -------
+    fig, axes : matplotlib figure and axes array
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    sns.set_theme("paper", style='ticks', rc=rc)
+
+    n_params = len(params)
+    n_rows = int(np.ceil(n_params / col_wrap))
+    if figsize is None:
+        figsize = (col_wrap * 3.1, n_rows * 2.5)
+
+    fig, axes = plt.subplots(n_rows, col_wrap, figsize=figsize, sharey=True)
+    axes = axes.flatten()
+
+    param_labels = _change_params_to_math_symbols(params)
+
+    for i, (param, label) in enumerate(zip(params, param_labels)):
+        ax = axes[i]
+        null_values = null_errors_df[param].values
+        observed_value = actual_errors[param].values[0]
+        weights = np.ones_like(null_values) / len(null_values)
+
+
+        # Compute bin edges
+        if logscale:
+            # Use log-spaced bins for uniform appearance on log scale
+            min_val = null_values[null_values > 0].min()
+            max_val = null_values.max()
+            bin_edges = np.geomspace(min_val, max_val, bins + 1)
+        else:
+            bin_edges = bins
+        ax.hist(null_values, bins=bin_edges, color='gray', weights=weights, alpha=0.7, edgecolor='gray')
+        ax.axvline(x=observed_value, color='red', linestyle='--',
+                   linewidth=2, label=f'observed:\n{observed_value:.2e}')
+        ax.set_title(label)
+        ax.set_xlabel('Squared Error with Broderick et al. V1')
+        ax.set_ylabel('Probability')
+        ax.set_ylim(0, ax.get_ylim()[1]*1.03)
+        if logscale:
+            ax.set_xscale('log', base=10)
+        ax.legend(fontsize=8, frameon=False)
+
+    # Hide unused subplots
+    for i in range(n_params, len(axes)):
+        axes[i].set_visible(False)
+
+    if title is not None:
+        fig.suptitle(f'{title}\n', fontsize=15, y=0.96)
+
+    plt.tight_layout()
+    utils.save_fig(save_path)
+
+    return fig, axes
+
+
+def _compute_histogram_bins(values, bins=50, logscale=True):
+    """Compute bin edges for histogram."""
+    if logscale:
+        positive = values[values > 0]
+        if len(positive) == 0:
+            return bins
+        return np.geomspace(positive.min(), values.max(), bins + 1)
+    return bins
+
+
+def _plot_histogram(ax, null_values, observed_value, color='gray',
+                    bins=50, logscale=True, title=None, xlabel='Squared Error'):
+    """Plot histogram with observed value line."""
+    weights = np.ones_like(null_values) / len(null_values)
+    bin_edges = _compute_histogram_bins(null_values, bins, logscale)
+
+    ax.hist(null_values, bins=bin_edges, color=color, weights=weights,
+            alpha=0.7, edgecolor=color)
+    ax.axvline(x=observed_value, color='red', linestyle='--',
+               linewidth=2, label=f'observed:\n{observed_value:.2e}')
+    if title:
+        ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel('Probability')
+    if logscale:
+        ax.set_xscale('log', base=10)
+    ax.legend(fontsize=8, frameon=False)
+
+
+def _sync_row_xlim(axes_list):
+    """Synchronize x-axis limits across axes in the same row."""
+    if not axes_list:
+        return
+    all_xlim = [ax.get_xlim() for ax in axes_list]
+    xmin = min(lim[0] for lim in all_xlim)
+    xmax = max(lim[1] for lim in all_xlim)
+    for ax in axes_list:
+        ax.set_xlim(xmin, xmax)
+
+
+def plot_combined_null_distributions(null_errors_df, actual_errors,
+                                     null_mse_values, actual_mse,
+                                     params=None, bins=50, logscale=True,
+                                     title=None, figsize=(14, 12), save_path=None):
+    """
+    Plot combined per-parameter error histograms and standardized MSE in a single figure.
+
+    Layout (4x4 grid):
+        Row 0: sigma, slope, intercept, [empty]
+        Row 1: p_1, p_2, p_3, p_4
+        Row 2: A_1, A_2, [empty], [empty]
+        Row 3: standardized MSE (spans cols 0-1), [empty], [empty]
+
+    Parameters
+    ----------
+    null_errors_df : pd.DataFrame
+        DataFrame with per-parameter error values for each permutation.
+    actual_errors : pd.DataFrame
+        Single-row DataFrame with actual error for each parameter.
+    null_mse_values : array-like
+        Array of null distribution standardized MSE values.
+    actual_mse : float
+        The observed standardized MSE value.
+    params : list of str, optional
+        Parameters to plot in order. Defaults to:
+        ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+    bins : int
+        Number of histogram bins.
+    logscale : bool
+        If True, use log scale on x-axis.
+    title : str, optional
+        Suptitle for the figure.
+    figsize : tuple
+        Figure size (width, height).
+    save_path : str, optional
+        Path to save the figure.
+
+    Returns
+    -------
+    fig, axes_dict : matplotlib figure and dict mapping param names to axes
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    sns.set_theme("paper", style='ticks', rc=rc)
+
+    # Create figure with GridSpec for flexible layout
+    # Use height_ratios to add extra space before row 3
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(4, 4, height_ratios=[1, 1, 1, 1.2],
+                          hspace=0.45, wspace=0.25)
+
+    param_positions = {
+        'sigma': (0, 0), 'slope': (0, 1), 'intercept': (0, 2),
+        'p_1': (1, 0), 'p_2': (1, 1), 'p_3': (1, 2), 'p_4': (1, 3),
+        'A_1': (2, 0), 'A_2': (2, 1)
+    }
+    param_label_map = dict(zip(params, _change_params_to_math_symbols(params)))
+
+    # Create axes with shared y-axis for rows 0-2 only
+    axes_dict = {}
+    row_axes = {0: [], 1: [], 2: []}
+    first_ax = None
+
+    for param in params:
+        row, col = param_positions[param]
+        ax = fig.add_subplot(gs[row, col], sharey=first_ax) if first_ax else fig.add_subplot(gs[row, col])
+        if first_ax is None:
+            first_ax = ax
+        axes_dict[param] = ax
+        row_axes[row].append(ax)
+
+    # Plot per-parameter histograms
+    for param in params:
+        _plot_histogram(
+            axes_dict[param],
+            null_errors_df[param].values,
+            actual_errors[param].values[0],
+            color='gray', bins=bins, logscale=logscale,
+            title=param_label_map[param], xlabel='Squared Error'
+        )
+
+    # Sync x-axis within each row
+    for axes_list in row_axes.values():
+        _sync_row_xlim(axes_list)
+
+    # Create MSE subplot centered in row 3 (cols 1-2), with its own y-axis
+    ax_mse = fig.add_subplot(gs[3, 0:2])
+    _plot_histogram(
+        ax_mse,
+        np.asarray(null_mse_values),
+        actual_mse,
+        color='black', bins=bins, logscale=logscale,
+        title='Standardized MSE', xlabel='MSE'
+    )
+    axes_dict['mse'] = ax_mse
+
+    if title is not None:
+        fig.suptitle(title, fontsize=14, y=0.95, fontweight='bold')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    utils.save_fig(save_path)
+
+    return fig, axes_dict
