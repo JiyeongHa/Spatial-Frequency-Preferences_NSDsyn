@@ -1865,22 +1865,30 @@ def _compute_histogram_bins(values, bins=50, logscale=True):
 
 
 def _plot_histogram(ax, null_values, observed_value, color='gray',
-                    bins=50, logscale=True, title=None, xlabel='Squared Error'):
-    """Plot histogram with observed value line."""
+                    bins=50, logscale=True, title=None, xlabel='Squared Error',
+                    higher_is_better=False):
+    """Plot histogram with observed value line and percentile text."""
     weights = np.ones_like(null_values) / len(null_values)
     bin_edges = _compute_histogram_bins(null_values, bins, logscale)
 
     ax.hist(null_values, bins=bin_edges, color=color, weights=weights,
             alpha=0.7, edgecolor=color)
-    ax.axvline(x=observed_value, color='red', linestyle='--',
-               linewidth=2, label=f'observed:\n{observed_value:.2e}')
+    all_values = np.append(null_values, observed_value)
+    if higher_is_better:
+        percentile = np.mean(all_values >= observed_value) * 100
+    else:
+        percentile = np.mean(all_values <= observed_value) * 100
+    ax.axvline(x=observed_value, color='red', linestyle='--', linewidth=2)
+    ax.text(0.95, 0.95, f'observed: {percentile:.1f}%',
+            transform=ax.transAxes, fontsize=8,
+            verticalalignment='top', horizontalalignment='right',
+            color='red')
     if title:
         ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel('Probability')
     if logscale:
         ax.set_xscale('log', base=10)
-    ax.legend(fontsize=8, frameon=False)
 
 
 def _sync_row_xlim(axes_list):
@@ -1896,16 +1904,17 @@ def _sync_row_xlim(axes_list):
 
 def plot_combined_null_distributions(null_errors_df, actual_errors,
                                      null_mse_values, actual_mse,
-                                     params=None, bins=50, logscale=True,
-                                     title=None, figsize=(14, 12), save_path=None):
+                                     null_corr_values=None, actual_corr=None,
+                                     params=None, col_wrap=4, bins=50,
+                                     logscale=True, title=None, figsize=None,
+                                     xlabel_params='Standardized Squared Error',
+                                     save_path=None):
     """
-    Plot combined per-parameter error histograms and standardized MSE in a single figure.
+    Plot combined per-parameter error histograms, MSE, and optionally correlation.
 
-    Layout (4x4 grid):
-        Row 0: sigma, slope, intercept, [empty]
-        Row 1: p_1, p_2, p_3, p_4
-        Row 2: A_1, A_2, [empty], [empty]
-        Row 3: standardized MSE (spans cols 0-1), [empty], [empty]
+    Layout is dynamic based on params list and col_wrap:
+        Param rows: params wrapped at col_wrap columns (shared y-axis, ylim=[0, 0.1])
+        Last row: MSE (cols 0:2), Correlation (cols 2:4) if provided
 
     Parameters
     ----------
@@ -1914,20 +1923,27 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     actual_errors : pd.DataFrame
         Single-row DataFrame with actual error for each parameter.
     null_mse_values : array-like
-        Array of null distribution standardized MSE values.
+        Array of null distribution MSE values.
     actual_mse : float
-        The observed standardized MSE value.
+        The observed MSE value.
+    null_corr_values : array-like, optional
+        Array of null distribution correlation values.
+    actual_corr : float, optional
+        The observed correlation value.
     params : list of str, optional
-        Parameters to plot in order. Defaults to:
-        ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+        Parameters to plot in order.
+    col_wrap : int
+        Number of columns for parameter grid.
     bins : int
         Number of histogram bins.
     logscale : bool
-        If True, use log scale on x-axis.
+        If True, use log scale on x-axis for error/MSE plots.
     title : str, optional
         Suptitle for the figure.
-    figsize : tuple
-        Figure size (width, height).
+    figsize : tuple, optional
+        Figure size. Auto-computed if None.
+    xlabel_params : str
+        X-axis label for per-parameter subplots.
     save_path : str, optional
         Path to save the figure.
 
@@ -1936,33 +1952,43 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     fig, axes_dict : matplotlib figure and dict mapping param names to axes
     """
     if params is None:
-        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+        params = ['slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
 
     sns.set_theme("paper", style='ticks', rc=rc)
 
-    # Create figure with GridSpec for flexible layout
-    # Use height_ratios to add extra space before row 3
+    n_params = len(params)
+    n_param_rows = int(np.ceil(n_params / col_wrap))
+    n_total_rows = n_param_rows + 1
+    has_corr = (null_corr_values is not None and actual_corr is not None)
+
+    if figsize is None:
+        figsize = (14, n_total_rows * 2.8)
+
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(4, 4, height_ratios=[1, 1, 1, 1.2],
+    height_ratios = [1] * n_param_rows + [1.2]
+    gs = fig.add_gridspec(n_total_rows, col_wrap,
+                          height_ratios=height_ratios,
                           hspace=0.45, wspace=0.25)
 
-    param_positions = {
-        'sigma': (0, 0), 'slope': (0, 1), 'intercept': (0, 2),
-        'p_1': (1, 0), 'p_2': (1, 1), 'p_3': (1, 2), 'p_4': (1, 3),
-        'A_1': (2, 0), 'A_2': (2, 1)
-    }
+    # Dynamic param positions based on ordering
+    param_positions = {}
+    for i, param in enumerate(params):
+        param_positions[param] = (i // col_wrap, i % col_wrap)
+
     param_label_map = dict(zip(params, _change_params_to_math_symbols(params)))
 
-    # Create axes with shared y-axis for rows 0-2 only
+    # Create axes with shared y-axis for param rows
     axes_dict = {}
-    row_axes = {0: [], 1: [], 2: []}
+    row_axes = {r: [] for r in range(n_param_rows)}
     first_ax = None
 
     for param in params:
         row, col = param_positions[param]
-        ax = fig.add_subplot(gs[row, col], sharey=first_ax) if first_ax else fig.add_subplot(gs[row, col])
         if first_ax is None:
+            ax = fig.add_subplot(gs[row, col])
             first_ax = ax
+        else:
+            ax = fig.add_subplot(gs[row, col], sharey=first_ax)
         axes_dict[param] = ax
         row_axes[row].append(ax)
 
@@ -1973,26 +1999,44 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
             null_errors_df[param].values,
             actual_errors[param].values[0],
             color='gray', bins=bins, logscale=logscale,
-            title=param_label_map[param], xlabel='Squared Error'
+            title=param_label_map[param], xlabel=xlabel_params
         )
+
+    # Set y-axis limits for per-parameter subplots
+    first_ax.set_ylim(0.0, 0.1)
 
     # Sync x-axis within each row
     for axes_list in row_axes.values():
         _sync_row_xlim(axes_list)
 
-    # Create MSE subplot centered in row 3 (cols 1-2), with its own y-axis
-    ax_mse = fig.add_subplot(gs[3, 0:2])
+    # MSE subplot in last row (cols 0:2)
+    last_row = n_param_rows
+    ax_mse = fig.add_subplot(gs[last_row, 0:2])
     _plot_histogram(
         ax_mse,
         np.asarray(null_mse_values),
         actual_mse,
         color='black', bins=bins, logscale=logscale,
-        title='Standardized MSE', xlabel='MSE'
+        title=r'Mean Standardized Error (excl. $\sigma$)', xlabel='MSE'
     )
     axes_dict['mse'] = ax_mse
 
+    # Correlation subplot in last row (cols 2:4)
+    if has_corr:
+        ax_corr = fig.add_subplot(gs[last_row, 2:4])
+        _plot_histogram(
+            ax_corr,
+            np.asarray(null_corr_values),
+            actual_corr,
+            color='black', bins=bins, logscale=False,
+            title=r'Correlation ($\mathit{r}$)', xlabel='Correlation (r)',
+            higher_is_better=True
+        )
+        ax_corr.set(xticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        axes_dict['corr'] = ax_corr
+
     if title is not None:
-        fig.suptitle(title, fontsize=14, y=0.95, fontweight='bold')
+        fig.suptitle(title, fontsize=14, y=0.98, fontweight='bold')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     utils.save_fig(save_path)
