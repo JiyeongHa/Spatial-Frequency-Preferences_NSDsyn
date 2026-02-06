@@ -562,6 +562,87 @@ def calculate_null_error_per_param_distribution(null_df, reference_df, perm_col=
     return pd.concat(results, ignore_index=True)
 
 
+def calculate_standardized_error_per_param_comparison(nsd_df, broderick_df, null_nsd_df,
+                                                       nsd_dset_type='NSD V1',
+                                                       broderick_dset_type='Broderick et al. V1',
+                                                       null_dset_type='Null NSD V1',
+                                                       perm_col='perm', params=None,
+                                                       standardize=True):
+    """Calculate per-parameter squared error for actual and null distributions.
+
+    When standardize=True, divides each parameter by pooled SD before computing errors.
+    When standardize=False, computes raw squared errors between group means.
+
+    Parameters
+    ----------
+    nsd_df : pd.DataFrame
+        NSD dataset
+    broderick_df : pd.DataFrame
+        Broderick dataset
+    null_nsd_df : pd.DataFrame
+        Null NSD dataset with permutation column
+    nsd_dset_type : str
+        Label for NSD data (default: 'NSD V1')
+    broderick_dset_type : str
+        Label for Broderick data (default: 'Broderick et al. V1')
+    null_dset_type : str
+        Label for null NSD data (default: 'Null NSD V1')
+    perm_col : str
+        Column name for permutation indices (default: 'perm')
+    params : list of str, optional
+        Parameter columns. Defaults to 9 standard params.
+    standardize : bool
+        If True, divide by pooled SD before computing errors. Default True.
+
+    Returns
+    -------
+    actual_errors : pd.DataFrame
+        Single-row DataFrame with squared error per parameter
+    null_errors_df : pd.DataFrame
+        DataFrame with columns [param1, ..., paramN, perm] containing
+        squared error per parameter per permutation
+    pooled_sd_df : pd.DataFrame or None
+        Pooled standard deviations (None when standardize=False)
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    nsd_df = nsd_df.copy()
+    broderick_df = broderick_df.copy()
+    null_nsd_df = null_nsd_df.copy()
+
+    nsd_df['dset_type'] = nsd_dset_type
+    broderick_df['dset_type'] = broderick_dset_type
+    null_nsd_df['dset_type'] = null_dset_type
+
+    actual_combined = pd.concat([nsd_df, broderick_df], axis=0)
+
+    if standardize:
+        pooled_sd_df = pooled_std(actual_combined, group_col='dset_type', params=params)
+        std_actual = standardized_mean(actual_combined, pooled_sd_df, group_col='dset_type', params=params)
+        nsd_means = std_actual[std_actual['dset_type'] == nsd_dset_type][params].values.squeeze()
+        brod_means = std_actual[std_actual['dset_type'] == broderick_dset_type][params].values.squeeze()
+        std_null = standardized_mean(null_nsd_df, pooled_sd_df,
+                                      group_col=['dset_type', perm_col], params=params)
+        null_means_array = std_null[params].values
+        perm_values = std_null[perm_col].values
+    else:
+        pooled_sd_df = None
+        group_means = actual_combined.groupby('dset_type')[params].mean().reset_index()
+        nsd_means = group_means[group_means['dset_type'] == nsd_dset_type][params].values.squeeze()
+        brod_means = group_means[group_means['dset_type'] == broderick_dset_type][params].values.squeeze()
+        null_group_means = null_nsd_df.groupby(['dset_type', perm_col])[params].mean().reset_index()
+        null_means_array = null_group_means[params].values
+        perm_values = null_group_means[perm_col].values
+
+    actual_errors = pd.DataFrame([(nsd_means - brod_means) ** 2], columns=params)
+    null_errors_array = (null_means_array - brod_means) ** 2
+    null_errors_df = pd.DataFrame(null_errors_array, columns=params)
+    null_errors_df[perm_col] = perm_values
+
+    return actual_errors, null_errors_df, pooled_sd_df
+
+
 def create_error_per_param_comparison_df(actual_errors, null_errors_df, perm_col='perm'):
     """
     Create DataFrame with actual and null per-parameter errors.
@@ -595,15 +676,12 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
                                               broderick_dset_type='Broderick et al. V1',
                                               null_dset_type='Null NSD V1',
                                               perm_col='perm', params=None,
-                                              metric='both'):
+                                              metric='both', standardize=True):
     """
-    Calculate MSE and/or correlation between NSD and Broderick data after standardization.
+    Calculate MSE and/or correlation between NSD and Broderick data.
 
-    This function:
-    1. Calculates pooled SD from actual NSD + Broderick combined data
-    2. Standardizes both datasets by dividing by pooled SD
-    3. Calculates MSE and/or correlation between standardized means (combining all 9 parameters)
-    4. For each null permutation, applies the same pooled SD and calculates the metric(s)
+    When standardize=True, divides by pooled SD before computing metrics.
+    When standardize=False, computes metrics from raw group means.
 
     Parameters
     ----------
@@ -628,6 +706,8 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
         - 'mse': Mean Squared Error only
         - 'corr': Pearson correlation only
         - 'both': Both MSE and correlation (default)
+    standardize : bool
+        If True, divide by pooled SD before computing metrics. Default True.
 
     Returns
     -------
@@ -636,26 +716,13 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
         If metric='corr': (actual_corr: float, null_corr_list: list of dict)
         If metric='both': ((actual_mse, actual_corr): tuple, null_result_list: list of dict)
             - null_result_list contains dicts with keys: 'perm', 'mse', 'corr'
-
-    Example
-    -------
-    >>> # Get both metrics
-    >>> (actual_mse, actual_corr), null_list = calculate_standardized_metric_comparison(
-    ...     nsd_df, broderick_df, null_nsd_df, metric='both')
-    >>> print(f"Actual MSE: {actual_mse:.4f}, Actual Corr: {actual_corr:.4f}")
-
-    >>> # Get MSE only (backward compatible)
-    >>> actual_mse, null_mse_list = calculate_standardized_metric_comparison(
-    ...     nsd_df, broderick_df, null_nsd_df, metric='mse')
     """
     if params is None:
         params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
 
-    # Validate metric parameter
     if metric not in ['mse', 'corr', 'both']:
         raise ValueError(f"metric must be 'mse', 'corr', or 'both', got '{metric}'")
 
-    # Step 1: Set up dset_type columns
     nsd_df = nsd_df.copy()
     broderick_df = broderick_df.copy()
     null_nsd_df = null_nsd_df.copy()
@@ -664,40 +731,35 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
     broderick_df['dset_type'] = broderick_dset_type
     null_nsd_df['dset_type'] = null_dset_type
 
-    # Step 2: Calculate pooled SD from actual NSD + Broderick combined
     actual_combined = pd.concat([nsd_df, broderick_df], axis=0)
-    pooled_sd_df = pooled_std(actual_combined, group_col='dset_type', params=params)
 
-    # Step 3: Calculate standardized means for actual data
-    standardized_actual = standardized_mean(actual_combined, pooled_sd_df, group_col='dset_type', params=params)
-
-    # Step 4: Extract standardized means as 1D arrays
-    nsd_std_means = standardized_actual[standardized_actual['dset_type'] == nsd_dset_type][params].values.squeeze()
-    broderick_std_means = standardized_actual[standardized_actual['dset_type'] == broderick_dset_type][params].values.squeeze()
+    if standardize:
+        pooled_sd_df = pooled_std(actual_combined, group_col='dset_type', params=params)
+        standardized_actual = standardized_mean(actual_combined, pooled_sd_df, group_col='dset_type', params=params)
+        nsd_means = standardized_actual[standardized_actual['dset_type'] == nsd_dset_type][params].values.squeeze()
+        broderick_means = standardized_actual[standardized_actual['dset_type'] == broderick_dset_type][params].values.squeeze()
+        standardized_null = standardized_mean(null_nsd_df, pooled_sd_df,
+                                              group_col=['dset_type', perm_col], params=params)
+        null_means_array = standardized_null[params].values
+        perm_indices = standardized_null[perm_col].values
+    else:
+        group_means = actual_combined.groupby('dset_type')[params].mean().reset_index()
+        nsd_means = group_means[group_means['dset_type'] == nsd_dset_type][params].values.squeeze()
+        broderick_means = group_means[group_means['dset_type'] == broderick_dset_type][params].values.squeeze()
+        null_group_means = null_nsd_df.groupby(['dset_type', perm_col])[params].mean().reset_index()
+        null_means_array = null_group_means[params].values
+        perm_indices = null_group_means[perm_col].values
 
     # Calculate actual metrics
-    actual_mse = np.mean((nsd_std_means - broderick_std_means) ** 2)
-    actual_corr = utils.pearson_r(nsd_std_means, broderick_std_means)
+    actual_mse = np.mean((nsd_means - broderick_means) ** 2)
+    actual_corr = utils.pearson_r(nsd_means, broderick_means)
 
-    # Step 5: Calculate standardized means for ALL null permutations at once (vectorized)
-    standardized_null = standardized_mean(null_nsd_df, pooled_sd_df,
-                                          group_col=['dset_type', perm_col], params=params)
+    # Null metrics (vectorized)
+    diff_squared = (null_means_array - broderick_means) ** 2
+    null_mse_array = np.mean(diff_squared, axis=1)
 
-    # Step 6: Calculate metrics for each permutation using vectorized operations
-    # Extract null standardized means as array (n_perms x n_params)
-    null_std_array = standardized_null[params].values  # shape: (n_perms, n_params)
-
-    # MSE: broderick_std_means is constant, broadcast subtraction across all permutations
-    diff_squared = (null_std_array - broderick_std_means) ** 2  # shape: (n_perms, n_params)
-    null_mse_array = np.mean(diff_squared, axis=1)  # shape: (n_perms,)
-
-    # Correlation: compute row-wise correlation with broderick_std_means
-    # Broadcast broderick_std_means to match null_std_array shape
-    broderick_std_means_broadcasted = np.broadcast_to(broderick_std_means, null_std_array.shape)  # shape: (n_perms, n_params)
-    null_corr_array = utils.pearson_r(null_std_array, broderick_std_means_broadcasted, axis=1)  # shape: (n_perms,)
-
-    # Get permutation indices in same order as standardized_null
-    perm_indices = standardized_null[perm_col].values
+    broderick_broadcasted = np.broadcast_to(broderick_means, null_means_array.shape)
+    null_corr_array = utils.pearson_r(null_means_array, broderick_broadcasted, axis=1)
 
     # Create output based on metric parameter
     if metric == 'mse':
