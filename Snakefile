@@ -589,8 +589,7 @@ rule plot_combined_error_mse_comparison:
                            'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')
     run:
         import matplotlib.pyplot as plt
-        from sfp_nsdsyn.bootstrapping import (calculate_error_per_param,
-                                              calculate_null_error_per_param_distribution,
+        from sfp_nsdsyn.bootstrapping import (calculate_standardized_error_per_param_comparison,
                                               calculate_standardized_metric_comparison)
         from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
 
@@ -600,24 +599,27 @@ rule plot_combined_error_mse_comparison:
         null_nsd_df = model.load_all_models(input.null_nsd_models, *['sub','lr','eph','roi','perm'])
         null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
 
-        # Calculate per-parameter errors
-        actual_errors = calculate_error_per_param(nsd_df, reference=broderick_df, params=PARAMS_2D)
-        null_errors_df = calculate_null_error_per_param_distribution(null_nsd_df, broderick_df, params=PARAMS_2D)
+        # Calculate per-parameter standardized squared errors
+        actual_errors, null_errors_df, _ = calculate_standardized_error_per_param_comparison(
+            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D)
 
-        # Calculate standardized MSE
-        (actual_mse, _), null_result_list = calculate_standardized_metric_comparison(
-            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D, metric='both')
+        # Calculate mean standardized error and correlation (excluding sigma)
+        params_no_sigma = [p for p in PARAMS_2D if p != 'sigma']
+        (actual_mse, actual_corr), null_result_list = calculate_standardized_metric_comparison(
+            nsd_df, broderick_df, null_nsd_df, params=params_no_sigma, metric='both')
         null_mse_values = [d['mse'] for d in null_result_list]
+        null_corr_values = [d['corr'] for d in null_result_list]
 
-        # Parameter order as specified
-        params_ordered = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+        # Parameter order (excluding sigma)
+        params_ordered = ['slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
 
         # Create combined plot
         fig, _ = vis2D.plot_combined_null_distributions(
             null_errors_df, actual_errors,
             null_mse_values, actual_mse,
+            null_corr_values=null_corr_values, actual_corr=actual_corr,
             params=params_ordered,
-        title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
+            title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
             bins=100,
             save_path=output.plot1)
         plt.close()
@@ -625,6 +627,7 @@ rule plot_combined_error_mse_comparison:
         fig, _ = vis2D.plot_combined_null_distributions(
             null_errors_df, actual_errors,
             null_mse_values, actual_mse,
+            null_corr_values=null_corr_values, actual_corr=actual_corr,
             params=params_ordered,
             title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
             bins=100,
