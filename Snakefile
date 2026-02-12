@@ -1,5 +1,5 @@
-configfile: "config.json"
 import os
+configfile: "config.json"
 import sys
 sys.path.append(config['PYSURFER_DIR'])
 import numpy as np
