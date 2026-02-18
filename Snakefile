@@ -584,13 +584,14 @@ rule plot_combined_error_mse_comparison:
             perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
     output:
         plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
-                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png'),
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_pidx-{perm_idx}.png'),
         plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
-                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_pidx-{perm_idx}.svg')
     run:
         import matplotlib.pyplot as plt
         from sfp_nsdsyn.bootstrapping import (calculate_standardized_error_per_param_comparison,
-                                              calculate_standardized_metric_comparison)
+                                              calculate_standardized_metric_comparison,
+                                              standardized_mean)
         from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
 
         # Load datasets
@@ -600,7 +601,7 @@ rule plot_combined_error_mse_comparison:
         null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
 
         # Calculate per-parameter standardized squared errors
-        actual_errors, null_errors_df, _ = calculate_standardized_error_per_param_comparison(
+        actual_errors, null_errors_df, pooled_sd_df = calculate_standardized_error_per_param_comparison(
             nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D)
 
         # Calculate mean standardized error and correlation (excluding sigma)
@@ -613,13 +614,34 @@ rule plot_combined_error_mse_comparison:
         # Parameter order (excluding sigma)
         params_ordered = ['slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
 
+        # Compute standardized means for scatter plots
+        _nsd = nsd_df.copy()
+        _brod = broderick_df.copy()
+        _nsd['dset_type'] = 'NSD V1'
+        _brod['dset_type'] = 'Broderick et al. V1'
+        combined = pd.concat([_nsd, _brod], axis=0)
+        std_means = standardized_mean(combined, pooled_sd_df, group_col='dset_type', params=params_ordered)
+        nsd_std_means = std_means[std_means['dset_type'] == 'NSD V1'][params_ordered].values.squeeze()
+        brod_std_means = std_means[std_means['dset_type'] == 'Broderick et al. V1'][params_ordered].values.squeeze()
+
+        # Get example null permutation for scatter plot
+        perm_idx = int(wildcards.perm_idx)
+        null_corr_example = null_corr_values[perm_idx]
+        perm_id = null_result_list[perm_idx]['perm']
+        _null_perm = null_nsd_df[null_nsd_df['perm'] == perm_id].copy()
+        _null_perm['dset_type'] = 'Null NSD V1'
+        null_std_means_perm = standardized_mean(_null_perm, pooled_sd_df, group_col='dset_type', params=params_ordered)
+        null_std_means_example = null_std_means_perm[params_ordered].values.squeeze()
+
         # Create combined plot
         fig, _ = vis2D.plot_combined_null_distributions(
             null_errors_df, actual_errors,
             null_mse_values, actual_mse,
             null_corr_values=null_corr_values, actual_corr=actual_corr,
+            nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
+            null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
             params=params_ordered,
-            title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
+            title=f'Per-parameter error between null NSD V1 vs. Broderick et al. V1 (N perm. = {wildcards.n_perm})',
             bins=100,
             save_path=output.plot1)
         plt.close()
@@ -628,8 +650,10 @@ rule plot_combined_error_mse_comparison:
             null_errors_df, actual_errors,
             null_mse_values, actual_mse,
             null_corr_values=null_corr_values, actual_corr=actual_corr,
+            nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
+            null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
             params=params_ordered,
-            title=f'Null Distribution of errors between parameter estimates in NSD vs. Broderick et al. V1',
+            title=f'Per-parameter error between null NSD V1 vs. Broderick et al. V1 (N perm. = {wildcards.n_perm})',
             bins=100,
             save_path=output.plot2)
         plt.close()
