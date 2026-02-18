@@ -2102,17 +2102,13 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
             title='', xlabel=r'Correlation ($\mathit{r}$)',
             higher_is_better=True, text_fontsize=8
         )
-<<<<<<< HEAD
         ax_corr.text(0.91, 0.85, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
                      transform=ax_corr.transAxes, fontsize=8,
                      verticalalignment='top',
                      horizontalalignment='right', color='red')
-=======
         ax_corr.set(xticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
         ax_corr.axhline(y=0, color='gray', linestyle=':', linewidth=0.8, zorder=0)
         ax_corr.axvline(x=0, color='gray', linestyle=':', linewidth=0.8, zorder=0)
-
->>>>>>> 6950939 (Add average tuning curves plotting function with error bars and update existing plots)
         axes_dict['corr'] = ax_corr
         ax_corr.set_xlabel(ax_corr.get_xlabel(), fontsize=8)
 
