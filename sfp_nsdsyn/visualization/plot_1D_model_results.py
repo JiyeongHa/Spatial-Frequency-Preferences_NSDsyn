@@ -52,6 +52,122 @@ def merge_pdf_values(bin_df, model_df, on=["sub", "vroinames", "ecc_bin"]):
     merge_df['pdf'] = merge_df.apply(_get_y_pdf, axis=1)
     return merge_df
 
+
+def plot_average_tuning_curves_NSD_with_errorbar(data_df, params_df,
+                                                 bins_to_plot, pal,
+                                                 x='local_sf', y='betas',
+                                                 markersize=20, normalize=True,
+                                                 width=6.5, height=2.6, save_path=None):
+
+    rc.update({'xtick.major.pad': 3,
+               'xtick.labelsize': 9,
+               'axes.titlepad': 10,
+               'legend.title_fontsize': 10,
+               'legend.fontsize': 10,
+               })
+    utils.set_rcParams(rc)
+
+    sns.set_theme("paper", style='ticks', rc=rc)
+    fig, axes = plt.subplots(1, 3, figsize=(width, height),
+                             sharex=True, sharey=True)
+
+    subj_list = data_df['sub'].unique()
+    for i, nsd_roi in enumerate(['V1', 'V2', 'V3']):
+        for cur_bin, ls, fc in zip(bins_to_plot, ['--', '-'], ['w', pal[i]]):
+            min_val = data_df.query('ecc_bin == @cur_bin & vroinames == "V2"')['local_sf'].min()
+            max_val = data_df.query('ecc_bin == @cur_bin & vroinames == "V2"')['local_sf'].max()
+            tmp_subj_df = data_df.query('ecc_bin == @cur_bin & vroinames == @nsd_roi')
+
+            if normalize:
+                all_pred_y = []
+                all_subj_df = pd.DataFrame({})
+                mean_scaling_factor = []
+                for subj in subj_list:
+                    subj_df = tmp_subj_df.query('sub == @subj')
+                    tmp_tuning_df = params_df.query('ecc_bin == @cur_bin & vroinames == @nsd_roi & sub == @subj')
+                    pred_x, pred_y = tuning._get_x_and_y_prediction(min_val * 0.7,
+                                                            max_val * 1.2,
+                                                            tmp_tuning_df['slope'].item(),
+                                                            tmp_tuning_df['mode'].item(),
+                                                            tmp_tuning_df['sigma'].item())
+                    pred_y = np.array(pred_y)
+                    scaling_factor = tmp_tuning_df['slope'].item()
+                    mean_scaling_factor.append(scaling_factor)
+                    subj_df[y] = subj_df[y] / scaling_factor
+                    pred_y = pred_y / scaling_factor
+                    all_pred_y.append(pred_y)
+                    all_subj_df = pd.concat([all_subj_df, subj_df], ignore_index=True)
+
+                all_pred_y = np.array(all_pred_y)
+                mean_scaling_factor = np.array(mean_scaling_factor).mean()
+                all_pred_y = all_pred_y * mean_scaling_factor
+                pred_y = np.mean(all_pred_y, axis=0)
+                all_subj_df[y] = all_subj_df[y] * mean_scaling_factor
+                tmp_subj_df = all_subj_df
+            else:
+                mean_tuning_df = params_df.query('ecc_bin == @cur_bin & vroinames == @nsd_roi')
+                pred_x, pred_y = tuning._get_x_and_y_prediction(min_val * 0.7,
+                                                        max_val * 1.2,
+                                                        mean_tuning_df['slope'].mean(),
+                                                        mean_tuning_df['mode'].mean(),
+                                                        mean_tuning_df['sigma'].mean())
+                pred_y = np.array(pred_y)
+
+            axes[i].plot(pred_x, pred_y,
+                         color=pal[i],
+                         linestyle=ls,
+                         linewidth=2,
+                         path_effects=[pe.Stroke(linewidth=1, foreground='black'),
+                                       pe.Normal()],
+                         zorder=0, clip_on=False)
+            tmp_df = tmp_subj_df.groupby(['freq_lvl'])[x].mean().reset_index()
+            # Map shared local_sf from tmp_df onto tmp_subj_df by freq_lvl
+            tmp_subj_df = tmp_subj_df.merge(tmp_df[['freq_lvl', x]].rename(columns={x: 'shared_local_sf'}),
+                                            on='freq_lvl', how='left')
+            axes[i] = sns.lineplot(
+                                data=tmp_subj_df,
+                                x='shared_local_sf',
+                                y=y,
+                                color=pal[i],
+                                marker='o',
+                                markersize=4,
+                                markerfacecolor=fc,
+                                markeredgecolor=pal[i],
+                                linestyle='none',
+                                linewidth=1.5,
+                                ax=axes[i],
+                                estimator='mean',
+                                label=None, errorbar=('ci', 68), err_style='bars')
+            axes[i].set_xlabel('')
+            axes[i].set_ylabel('')
+            axes[i].set_title(f'{nsd_roi}')
+
+    for g in range(len(axes)):
+        axes[g].set_xscale('log')
+        axes[g].set(xlim=[0.1, 40])
+        axes[g].set(ylim=[1,4], yticks=[1,2,3,4])
+
+
+
+        axes[g].spines['top'].set_visible(False)
+        axes[g].spines['right'].set_visible(False)
+        axes[g].tick_params(axis='both')
+        axes[g].legend(title=None, loc=(-0.1, 0.00), frameon=False, handletextpad=0.08)
+
+
+    # axes[-1].legend(title='Eccentricity band', bbox_to_anchor=(1, 0.85), frameon=False)
+    # leg = axes[-1].get_legend()
+    # leg.legendHandles[0].set_edgecolor('black')
+    # leg.legendHandles[1].set_color('black')
+    fig.supxlabel('Spatial frequency (cpd)')
+    if not normalize:
+            fig.supylabel('Response\n(% BOLD signal change)', ha='center')
+    else:
+        fig.supylabel('BOLD response\n(Normalized amplitude)', ha='center')
+    fig.subplots_adjust(wspace=0.32, left=0.12, bottom=0.2)
+    utils.save_fig(save_path)
+    return fig, axes
+
 def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
                                           bins_to_plot, pal,
                                          x='local_sf', y='betas',
@@ -91,10 +207,10 @@ def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
                          path_effects=[pe.Stroke(linewidth=1, foreground='black'),
                                        pe.Normal()],
                          zorder=0, clip_on=False)
-            summary_betas = (tmp_subj_df.groupby(['freq_lvl'])['normed_betas']
+            summary_betas = (tmp_subj_df.groupby(['freq_lvl'])[y]
                       .agg(['mean', 'std', 'count'])
                       .assign(se=lambda x: x['std'] / np.sqrt(x['count'])))
-            summary_local_sf = (tmp_subj_df.groupby(['freq_lvl'])['local_sf']
+            summary_local_sf = (tmp_subj_df.groupby(['freq_lvl'])[x]
                       .mean().reset_index())
             # axes[i].errorbar(summary_local_sf['local_sf'], 
             #                  summary_betas['mean'],
@@ -102,9 +218,9 @@ def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
             #                  markeredgecolor=pal[i],
             #                  ecolor=pal[i],
             #                  fmt='o-', capsize=None, markersize=3, elinewidth=1.3, zorder=10)
-            tmp_df = tmp_subj_df.groupby(['freq_lvl'])['local_sf'].mean().reset_index()
+            tmp_df = tmp_subj_df.groupby(['freq_lvl'])[x].mean().reset_index()
             # Map shared local_sf from tmp_df onto tmp_subj_df by freq_lvl
-            tmp_subj_df = tmp_subj_df.merge(tmp_df[['freq_lvl', 'local_sf']].rename(columns={'local_sf': 'shared_local_sf'}),
+            tmp_subj_df = tmp_subj_df.merge(tmp_df[['freq_lvl', x]].rename(columns={x: 'shared_local_sf'}),
                                             on='freq_lvl', how='left')
             axes[i] = sns.lineplot(
                                 data=tmp_subj_df,
@@ -142,7 +258,7 @@ def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
     # leg.legendHandles[1].set_color('black')
 
     fig.supxlabel('Spatial frequency (cpd)')
-    fig.supylabel('BOLD response\n(Normalized amplitude)', ha='center')
+    fig.supylabel('Response\n(% BOLD signal change)', ha='center')
     fig.subplots_adjust(wspace=0.32, left=0.12, bottom=0.2)
     utils.save_fig(save_path)
     return fig, axes
