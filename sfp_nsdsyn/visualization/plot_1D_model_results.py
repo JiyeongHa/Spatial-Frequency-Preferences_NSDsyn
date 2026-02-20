@@ -33,7 +33,7 @@ rc = {'text.color': 'black',
       'ytick.labelsize': 11,
       'legend.title_fontsize': 11,
       'legend.fontsize': 11,
-      'figure.titlesize': 11,
+      'figure.titlesize': 13,
       'figure.dpi': 72 * 3,
       'savefig.dpi': 72 * 4
       }
@@ -53,23 +53,46 @@ def merge_pdf_values(bin_df, model_df, on=["sub", "vroinames", "ecc_bin"]):
     return merge_df
 
 
-def plot_average_tuning_curves_NSD_with_errorbar(data_df, params_df,
-                                                 bins_to_plot, pal,
-                                                 x='local_sf', y='betas',
-                                                 markersize=20, normalize=True,
-                                                 width=6.5, height=2.6, save_path=None):
-
+def _setup_tuning_figure(width, height):
     rc.update({'xtick.major.pad': 3,
                'xtick.labelsize': 9,
                'axes.titlepad': 10,
                'legend.title_fontsize': 10,
-               'legend.fontsize': 10,
-               })
+               'legend.fontsize': 10})
     utils.set_rcParams(rc)
-
     sns.set_theme("paper", style='ticks', rc=rc)
-    fig, axes = plt.subplots(1, 3, figsize=(width, height),
-                             sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(width, height), sharex=True, sharey=True)
+    return fig, axes
+
+
+def _format_tuning_axes(fig, axes, title, save_path):
+    for ax in axes:
+        ax.set_xscale('log')
+        ax.set(xlim=[0.1, 40])
+        ax.set(ylim=[1, 4], yticks=[1, 2, 3, 4])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(axis='both')
+        ax.legend(title=None, loc=(-0.1, 0.00), frameon=False, handletextpad=0.08)
+    if title is not None:
+        fig.suptitle(title)
+    fig.supxlabel('Spatial frequency (cpd)')
+    fig.supylabel('Response\n(% BOLD signal change)', ha='center')
+    fig.subplots_adjust(wspace=0.32, left=0.098, top=0.79, bottom=0.175)
+    utils.save_fig(save_path)
+
+
+def plot_average_tuning_curves_NSD_with_errorbar(data_df, params_df,
+                                                 bins_to_plot, pal, title=None,
+                                                 x='local_sf', y='betas', errorbar=True,
+                                                 markersize=20, normalize=True,
+                                                 width=6.5, height=2.8, axes=None, save_path=None):
+
+    standalone = axes is None
+    if standalone:
+        fig, axes = _setup_tuning_figure(width, height)
+    else:
+        fig = None
 
     subj_list = data_df['sub'].unique()
     for i, nsd_roi in enumerate(['V1', 'V2', 'V3']):
@@ -142,49 +165,62 @@ def plot_average_tuning_curves_NSD_with_errorbar(data_df, params_df,
             axes[i].set_ylabel('')
             axes[i].set_title(f'{nsd_roi}')
 
-    for g in range(len(axes)):
-        axes[g].set_xscale('log')
-        axes[g].set(xlim=[0.1, 40])
-        axes[g].set(ylim=[1,4], yticks=[1,2,3,4])
-
-
-
-        axes[g].spines['top'].set_visible(False)
-        axes[g].spines['right'].set_visible(False)
-        axes[g].tick_params(axis='both')
-        axes[g].legend(title=None, loc=(-0.1, 0.00), frameon=False, handletextpad=0.08)
-
-
-    # axes[-1].legend(title='Eccentricity band', bbox_to_anchor=(1, 0.85), frameon=False)
-    # leg = axes[-1].get_legend()
-    # leg.legendHandles[0].set_edgecolor('black')
-    # leg.legendHandles[1].set_color('black')
-    fig.supxlabel('Spatial frequency (cpd)')
-    if not normalize:
-            fig.supylabel('Response\n(% BOLD signal change)', ha='center')
-    else:
-        fig.supylabel('BOLD response\n(Normalized amplitude)', ha='center')
-    fig.subplots_adjust(wspace=0.32, left=0.12, bottom=0.2)
-    utils.save_fig(save_path)
+    if standalone:
+        _format_tuning_axes(fig, axes, title, save_path)
     return fig, axes
+
+
+def plot_combined_tuning_curves(subj_data_df, subj_params_df,
+                                group_data_df, group_params_df,
+                                bins_to_plot, pal, row_titles,
+                                y='betas', normalize=False, errorbar=True,
+                                width=6.5, height=6, save_path=None):
+    rc.update({'xtick.major.pad': 3, 'xtick.labelsize': 9,
+               'axes.titlepad': 10, 'legend.title_fontsize': 10,
+               'legend.fontsize': 10})
+    utils.set_rcParams(rc)
+    sns.set_theme("paper", style='ticks', rc=rc)
+    fig, all_axes = plt.subplots(2, 3, figsize=(width, height),
+                                 sharex=True, sharey=True)
+    plot_tuning_curves_NSD_with_errorbar(subj_data_df, subj_params_df,
+                                         bins_to_plot=bins_to_plot, pal=pal,
+                                         y=y, normalize=normalize,
+                                         errorbar=errorbar, axes=all_axes[0])
+    plot_average_tuning_curves_NSD_with_errorbar(group_data_df, group_params_df,
+                                                  bins_to_plot=bins_to_plot, pal=pal,
+                                                  y=y, normalize=normalize,
+                                                  errorbar=errorbar, axes=all_axes[1])
+    for ax in all_axes.flat:
+        ax.set_xscale('log')
+        ax.set(xlim=[0.1, 40], ylim=[1, 4], yticks=[1, 2, 3, 4])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(axis='both')
+        ax.legend(title=None, loc=(-0.1, 0.00), frameon=False, handletextpad=0.08)
+    for row_idx, row_title in enumerate(row_titles):
+        row_top = all_axes[row_idx, 1].get_position().y1
+        fig.text(0.5, row_top + 0.09, row_title, ha='center', fontsize=rc['axes.titlesize'])
+    ylabel = 'Response\n(% BOLD signal change)'
+    for row_idx in range(2):
+        all_axes[row_idx, 0].set_ylabel(ylabel, ha='center')
+
+    fig.supxlabel('Spatial frequency (cpd)')
+    fig.subplots_adjust(wspace=0.32, hspace=0.6, left=0.098, top=0.92, bottom=0.09)
+    utils.save_fig(save_path)
+    return fig, all_axes
+
 
 def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
                                           bins_to_plot, pal,
                                          x='local_sf', y='betas',
-                                         markersize=20, normalize=True,
-                                         width=6.5, height=2.6, save_path=None):
+                                         normalize=True, errorbar=True, title=None,
+                                         width=6.5, height=2.8, axes=None, save_path=None):
 
-    rc.update({'xtick.major.pad': 3,
-               'xtick.labelsize': 9,
-               'axes.titlepad': 10,
-               'legend.title_fontsize': 10,
-               'legend.fontsize': 10,
-               })
-    utils.set_rcParams(rc)
-    
-    sns.set_theme("paper", style='ticks', rc=rc)
-    fig, axes = plt.subplots(1, 3, figsize=(width, height),
-                             sharex=True, sharey=True)
+    standalone = axes is None
+    if standalone:
+        fig, axes = _setup_tuning_figure(width, height)
+    else:
+        fig = None
     for i, nsd_roi in enumerate(['V1', 'V2', 'V3']):
         for cur_bin, ls, fc in zip(bins_to_plot, ['--', '-'], ['w', pal[i]]):
             min_val = data_df.query('ecc_bin == @cur_bin & vroinames == "V2"')['local_sf'].min()
@@ -207,21 +243,9 @@ def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
                          path_effects=[pe.Stroke(linewidth=1, foreground='black'),
                                        pe.Normal()],
                          zorder=0, clip_on=False)
-            summary_betas = (tmp_subj_df.groupby(['freq_lvl'])[y]
-                      .agg(['mean', 'std', 'count'])
-                      .assign(se=lambda x: x['std'] / np.sqrt(x['count'])))
-            summary_local_sf = (tmp_subj_df.groupby(['freq_lvl'])[x]
-                      .mean().reset_index())
-            # axes[i].errorbar(summary_local_sf['local_sf'], 
-            #                  summary_betas['mean'],
-            #                  yerr=summary_betas['se'], alpha=0.95, color=fc, markerfacecolor=fc, linestyle='none',
-            #                  markeredgecolor=pal[i],
-            #                  ecolor=pal[i],
-            #                  fmt='o-', capsize=None, markersize=3, elinewidth=1.3, zorder=10)
-            tmp_df = tmp_subj_df.groupby(['freq_lvl'])[x].mean().reset_index()
-            # Map shared local_sf from tmp_df onto tmp_subj_df by freq_lvl
-            tmp_subj_df = tmp_subj_df.merge(tmp_df[['freq_lvl', x]].rename(columns={x: 'shared_local_sf'}),
-                                            on='freq_lvl', how='left')
+            shared_sf = tmp_subj_df.groupby('freq_lvl')[x].mean().reset_index().rename(columns={x: 'shared_local_sf'})
+            tmp_subj_df = tmp_subj_df.merge(shared_sf, on='freq_lvl', how='left')
+            eb_arg = ('ci', 68) if errorbar else None
             axes[i] = sns.lineplot(
                                 data=tmp_subj_df,
                                 x='shared_local_sf',
@@ -235,32 +259,13 @@ def plot_tuning_curves_NSD_with_errorbar(data_df, params_df,
                                 linewidth=1.5,
                                 ax=axes[i],
                                 estimator='mean',
-                                label=None, errorbar=('ci', 68), err_style='bars')
+                                label=None, errorbar=eb_arg, err_style='bars')
             axes[i].set_xlabel('')
             axes[i].set_ylabel('')
             axes[i].set_title(f'{nsd_roi}')
 
-    for g in range(len(axes)):
-        axes[g].set_xscale('log')
-        axes[g].set(xlim=[0.1, 40])
-        if normalize:
-            axes[g].set(ylim=[0, 1.05], yticks=[0, 0.5, 1])
-
-        axes[g].spines['top'].set_visible(False)
-        axes[g].spines['right'].set_visible(False)
-        axes[g].tick_params(axis='both')
-        axes[g].legend(title=None, loc=(-0.1, 0.00), frameon=False, handletextpad=0.08)
-
-
-    # axes[-1].legend(title='Eccentricity band', bbox_to_anchor=(1, 0.85), frameon=False)
-    # leg = axes[-1].get_legend()
-    # leg.legendHandles[0].set_edgecolor('black')
-    # leg.legendHandles[1].set_color('black')
-
-    fig.supxlabel('Spatial frequency (cpd)')
-    fig.supylabel('Response\n(% BOLD signal change)', ha='center')
-    fig.subplots_adjust(wspace=0.32, left=0.12, bottom=0.2)
-    utils.save_fig(save_path)
+    if standalone:
+        _format_tuning_axes(fig, axes, title, save_path)
     return fig, axes
 
 def plot_tuning_curves_NSD(data_df, params_df,
