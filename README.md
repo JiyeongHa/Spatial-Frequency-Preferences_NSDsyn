@@ -6,7 +6,7 @@ for [spatial frequency preferences in human visual cortex](https://jov.arvojourn
 
 Citation
 ```
-Ha, Broderick, Kay, & Winawer (2022). Spatial Frequency Maps in Human Visual Cortex: A Replication and Extension. .., .., . https://??
+Ha, J., Broderick, W. F., Kay, K., & Winawer, J. (2025). Spatial Frequency Maps in Human Visual Cortex: A Replication and Extension. *bioRxiv*, 2025.01.21.634150. https://doi.org/10.1101/2025.01.21.634150
 
 ```
 
@@ -19,7 +19,6 @@ Table of Contents
    * [NSD synthetic data](#nsd-synthetic-data)
 * [Analysis pipeline](#analysis-pipeline)
     * [Reproducing the figures](#reproducing-the-figures)
-    * [Understanding the pipeline](#understanding-the-pipeline)
 
 # Dependencies
 All of the code in this repository is written in Python (3.7 and 3.8). To reproduce the python environment, we recommend using Conda to manage the dependencies.
@@ -45,16 +44,15 @@ The data for this project is available on OSF (https://osf.io/umqkw/).
 
 # Analysis pipeline
 ## Reproducing the figures
-We used snakemake to manage the analysis pipeline. The pipeline is defined in the `Snakefile` in the root directory. To reproduce all the figures, you can use the following command:
-Add `-N` if you wish to run the pipeline in dry-run mode.
-```
-snakemake -j1 figure_all
+Jupyter notebooks for reproducing each figure are available in the `figures/` directory:
 
-```
+| Notebook | Figures | Description |
+|----------|---------|-------------|
+| `fig1.ipynb` | 1a–c | NSD synthetic stimuli examples, Broderick et al. comparison stimulus, and stimulus parameter space |
+| `fig4.ipynb` | 4 | 1D model results: Spatial frequency tuning curves (subject-level and group-level) |
 
-## Understanding the pipeline 
-We also provide a set of jupyter notebooks under the `notebooks` directory to understand the pipeline. The notebooks provide a step-by-step guide to the analysis pipeline. The number indicates the order of the analysis steps.
-Step 0: Stimulus check
-Step 1: Prepping the data
-Step 2: One-dimensional model: Fitting a log-Gaussian function to eccentricity-binned data
-Step 3: Two-dimensional model: Fitting the Broderick et al. model to the data
+| `fig5.ipynb` | 5a–d | 1D model results: Preferred period and bandwidth as a function of eccentricity |
+| `fig6-11.ipynb` | 6–11 | 2D model parameters for replication goal (Broderick et al. vs. NSD V1) |
+| `fig12-17.ipynb` | 12–17 | 2D model parameters for extension goal (V1, V2, & V3) |
+
+Figures 2 and 3 were created manually and are not included in the notebooks.
