@@ -36,6 +36,16 @@ ROI_PAL = [(0.5490196078431373, 0.03137254901960784, 0.0),
            (0.07058823529411765, 0.44313725490196076, 0.10980392156862745),
            (0.0, 0.10980392156862745, 0.4980392156862745)]  #[sns.color_palette('dark', 10)[:][k] for k in [3,2,0]]
 
+def perm_batch(perm):
+    """Return batch subdirectory name for a permutation index (e.g., 0-99 -> 'batch_000')."""
+    return f"batch_{int(perm) // 100 * 100:03d}"
+
+def perm_model_pt(dset, subj, perm, lr, max_epoch, roi, vs):
+    """Build path to a permutation model .pt file, organized into batch subdirectories."""
+    return os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", dset, 'perm', subj,
+                        perm_batch(perm),
+                        f'perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt')
+
 # small tests to make sure snakemake is playing nicely with the job management
 # system.
 rule test_run:
@@ -409,9 +419,9 @@ rule shuffle_df:
         subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'model', 'dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_tavg-False.csv'),
         precision = os.path.join(config['OUTPUT_DIR'],'dataframes','{dset}', 'precision', 'precision-v_sub-{subj}_roi-{roi}_vs-{vs}.csv')
     output:
-        shuffled_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
+        shuffled_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', '{subj}', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
     log:
-        os.path.join(config['OUTPUT_DIR'], 'logs', 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_shuffle.log')
+        os.path.join(config['OUTPUT_DIR'], 'logs', 'dataframes', '{dset}', 'perm','{subj}', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_shuffle.log')
     run:
         from sfp_nsdsyn.bootstrapping import shuffle_class_idx
         np.random.seed(int(wildcards.perm))
@@ -422,15 +432,57 @@ rule shuffle_df:
         df = shuffle_class_idx(df, groupby_cols=['sub','voxel'], to_shuffle=['betas'], same_perm=True)
         df.to_csv(output.shuffled_df, index=False)
 
+rule plot_null_param_distributions:
+    """Plot null model parameter value distributions with observed values marked."""
+    input:
+        nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
+                            'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                            subj=make_subj_list('nsdsyn')),
+        null_nsd_models = lambda wc: [
+            perm_model_pt('nsdsyn', subj, p, wc.lr, wc.max_epoch, 'V1', wc.vs)
+            for p in range(int(wc.n_perm))
+            for subj in make_subj_list('nsdsyn')]
+    output:
+        plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'null_param_distributions_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.png'),
+        plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
+                           'null_param_distributions_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.svg')
+    run:
+        import matplotlib.pyplot as plt
+        from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
+
+        nsd_df = model.load_all_models(input.nsd_models, *ARGS_2D)
+        null_nsd_df = model.load_all_models(input.null_nsd_models, *['sub','lr','eph','roi','perm'])
+        null_nsd_df['perm'] = null_nsd_df['perm'].astype(int)
+
+        actual_means = nsd_df[PARAMS_2D].mean().to_dict()
+        null_param_df = null_nsd_df.groupby('perm')[PARAMS_2D].mean().reset_index()
+
+        fig, _ = vis2D.plot_null_param_value_distributions(
+            null_param_df, actual_means,
+            params=PARAMS_2D,
+            title=f'Null Model Parameter Distributions (N perm. = {wildcards.n_perm})',
+            bins=100,
+            save_path=output.plot1)
+        plt.close()
+
+        fig, _ = vis2D.plot_null_param_value_distributions(
+            null_param_df, actual_means,
+            params=PARAMS_2D,
+            title=f'Null Model Parameter Distributions (N perm. = {wildcards.n_perm})',
+            bins=100,
+            save_path=output.plot2)
+        plt.close()
+
 rule run_model_shuffled:
     input:
-        subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv')
+        subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', '{subj}', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv')
     output:
-        model = os.path.join(config['OUTPUT_DIR'], "sfp_model","results_2D", "{dset}", 'perm','perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt'),
+        model = os.path.join(config['OUTPUT_DIR'], "sfp_model","results_2D", "{dset}", 'perm', '{subj}', '{batch}', 'perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt'),
     log:
-        os.path.join(config['OUTPUT_DIR'], "logs", "sfp_model","results_2D", "{dset}",'perm','perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.log'),
+        os.path.join(config['OUTPUT_DIR'], "logs", "sfp_model","results_2D", "{dset}",'perm', '{subj}', '{batch}', 'perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.log'),
     benchmark:
-        os.path.join(config['OUTPUT_DIR'], "benchmark", "sfp_model","results_2D", "{dset}",'perm','perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.txt'),
+        os.path.join(config['OUTPUT_DIR'], "benchmark", "sfp_model","results_2D", "{dset}",'perm', '{subj}', '{batch}', 'perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.txt'),
     resources:
         cpus_per_task = 1,
         mem_mb = 4000
@@ -447,13 +499,13 @@ rule run_model_shuffled:
                                                          anomaly_detection=False,
                                                          amsgrad=False,
                                                          eps=1e-8)
-        model_history.to_hdf(output.model_history, key='stage', mode='w')
-        loss_history.to_hdf(output.loss_history, key='stage', mode='w')    
+        #model_history.to_hdf(output.model_history, key='stage', mode='w')
+        #loss_history.to_hdf(output.loss_history, key='stage', mode='w')    
 
 rule run_shuffle_model_all:
     input:
-        expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "{dset}", 'perm', 'perm-{perm}_model-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.h5'),
-               dset='nsdsyn', lr=LR_2D, max_epoch=MAX_EPOCH_2D, subj=make_subj_list('nsdsyn'), roi=['V1'], vs='pRFsize', perm=np.arange(0,100))
+        expand(os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', '{subj}', 'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
+               dset='nsdsyn', subj=make_subj_list('nsdsyn')[3:], roi=['V1'], vs='pRFsize', perm=np.arange(0,1000))
 
 rule compare_mse_nsd_broderick_per_param:
     input:
@@ -463,10 +515,10 @@ rule compare_mse_nsd_broderick_per_param:
         broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
                                   'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
                                   subj=make_subj_list('broderick')),
-        null_nsd_models = lambda wc: expand(
-            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
-                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
-            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
+        null_nsd_models = lambda wc: [
+            perm_model_pt('nsdsyn', subj, p, wc.lr, wc.max_epoch, 'V1', wc.vs)
+            for p in range(int(wc.n_perm))
+            for subj in make_subj_list('nsdsyn')]
     output:
         csv = os.path.join(config['OUTPUT_DIR'], 'sfp_model', 'results_2D', 'perm',
                           'error_per_param_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.csv'),
@@ -521,10 +573,10 @@ rule compare_standardized_metrics_nsd_broderick:
         broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
                                   'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
                                   subj=make_subj_list('broderick')),
-        null_nsd_models = lambda wc: expand(
-            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
-                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
-            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
+        null_nsd_models = lambda wc: [
+            perm_model_pt('nsdsyn', subj, p, wc.lr, wc.max_epoch, 'V1', wc.vs)
+            for p in range(int(wc.n_perm))
+            for subj in make_subj_list('nsdsyn')]
     output:
         csv = os.path.join(config['OUTPUT_DIR'], 'sfp_model', 'results_2D', 'perm',
                           'standardized_metrics_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}.csv'),
@@ -578,10 +630,10 @@ rule plot_combined_error_mse_comparison:
         broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
                                   'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
                                   subj=make_subj_list('broderick')),
-        null_nsd_models = lambda wc: expand(
-            os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn", 'perm', '{subj}',
-                        'perm-{perm}_model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
-            perm=range(int(wc.n_perm)), subj=make_subj_list('nsdsyn'))
+        null_nsd_models = lambda wc: [
+            perm_model_pt('nsdsyn', subj, p, wc.lr, wc.max_epoch, 'V1', wc.vs)
+            for p in range(int(wc.n_perm))
+            for subj in make_subj_list('nsdsyn')]
     output:
         plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
                            'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_pidx-{perm_idx}.png'),

@@ -1831,8 +1831,9 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
         else:
             bin_edges = bins
         ax.hist(null_values, bins=bin_edges, color='gray', weights=weights, alpha=0.7, edgecolor='gray')
+        percentile = np.sum(null_values <= observed_value) / len(null_values) * 100
         ax.axvline(x=observed_value, color='red', linestyle='--',
-                   linewidth=2, label=f'observed:\n{observed_value:.2e}')
+                   linewidth=2, label=f'{percentile:.2f}%')
         ax.set_title(label)
         ax.set_xlabel('Squared Error with Broderick et al. V1')
         ax.set_ylabel('Probability')
@@ -1842,6 +1843,79 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
         ax.legend(fontsize=8, frameon=False)
 
     # Hide unused subplots
+    for i in range(n_params, len(axes)):
+        axes[i].set_visible(False)
+
+    if title is not None:
+        fig.suptitle(f'{title}\n', fontsize=15, y=0.96)
+
+    plt.tight_layout()
+    utils.save_fig(save_path)
+
+    return fig, axes
+
+
+def plot_null_param_value_distributions(null_param_df, actual_param_values,
+                                        params=None, col_wrap=3, figsize=None,
+                                        bins=20, title=None, save_path=None):
+    """Plot histograms of null model parameter values with observed values marked.
+
+    Parameters
+    ----------
+    null_param_df : pd.DataFrame
+        DataFrame with one row per permutation. Columns include parameter names
+        (mean across subjects per permutation).
+    actual_param_values : dict or pd.Series
+        Observed mean parameter value for each parameter.
+    params : list of str, optional
+        Parameters to plot. Defaults to 9 standard params.
+    col_wrap : int
+        Number of columns in the subplot grid.
+    figsize : tuple, optional
+        Figure size. Auto-calculated if None.
+    bins : int
+        Number of histogram bins.
+    title : str, optional
+        Suptitle for the figure.
+    save_path : str, optional
+        Path to save the figure.
+
+    Returns
+    -------
+    fig, axes : matplotlib figure and axes array
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+
+    sns.set_theme("paper", style='ticks', rc=rc)
+
+    n_params = len(params)
+    n_rows = int(np.ceil(n_params / col_wrap))
+    if figsize is None:
+        figsize = (col_wrap * 3.1, n_rows * 2.5)
+
+    fig, axes = plt.subplots(n_rows, col_wrap, figsize=figsize, sharey=False)
+    axes = axes.flatten()
+
+    param_labels = _change_params_to_math_symbols(params)
+
+    for i, (param, label) in enumerate(zip(params, param_labels)):
+        ax = axes[i]
+        null_values = null_param_df[param].values
+        observed_value = actual_param_values[param]
+        weights = np.ones_like(null_values) / len(null_values)
+
+        ax.hist(null_values, bins=bins, color='gray', weights=weights,
+                alpha=0.7, edgecolor='gray')
+        percentile = np.sum(null_values <= observed_value) / len(null_values) * 100
+        ax.axvline(x=observed_value, color='red', linestyle='--',
+                   linewidth=2, label=f'{percentile:.2f}%')
+        ax.set_title(label)
+        ax.set_xlabel('Parameter value')
+        ax.set_ylabel('Probability')
+        ax.set_ylim(0, ax.get_ylim()[1] * 1.03)
+        ax.legend(fontsize=8, frameon=False)
+
     for i in range(n_params, len(axes)):
         axes[i].set_visible(False)
 
