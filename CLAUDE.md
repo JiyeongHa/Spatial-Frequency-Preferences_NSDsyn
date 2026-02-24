@@ -237,6 +237,8 @@ snakemake -j1 /path/to/output.csv     # actual run
 7. **Large directories** - Use `find` instead of `ls` when directories have thousands of files to avoid "argument list too long" errors
 8. **Plotting functions only plot** - Never put data computation (pooled_std, standardized_mean, etc.) inside visualization functions. Compute upstream and pass pre-computed arrays
 9. **Match array ordering to param lists** - When passing arrays indexed by position alongside a param list, ensure both use the same order (e.g., `params_ordered` vs `params_no_sigma` have same elements but different order)
+10. **`conda run` may resolve to wrong env** - If `conda run -n <env>` uses the wrong Python, use the full path instead: `/Users/jh7685/opt/miniconda3/envs/<env>/bin/python`
+11. **`sfp_torch` env for standalone torch notebooks** - The `sfp` env (Python 3.7 + PyTorch 1.13.1) segfaults on macOS 16. Use `sfp_torch` (Python 3.11 + PyTorch 2.2.2 + numpy<2) for notebooks that only need torch/numpy/matplotlib
 
 
 ---
