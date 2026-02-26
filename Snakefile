@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import matplotlib as mpl
 mpl.use('Agg')
+from sfp_nsdsyn import *
 import pickle
 pickle.HIGHEST_PROTOCOL = 4
-from sfp_nsdsyn import *
 from pysurfer.freeview_helper import retinotopy_colors
 
 
