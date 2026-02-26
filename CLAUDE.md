@@ -238,7 +238,9 @@ snakemake -j1 /path/to/output.csv     # actual run
 8. **Plotting functions only plot** - Never put data computation (pooled_std, standardized_mean, etc.) inside visualization functions. Compute upstream and pass pre-computed arrays
 9. **Match array ordering to param lists** - When passing arrays indexed by position alongside a param list, ensure both use the same order (e.g., `params_ordered` vs `params_no_sigma` have same elements but different order)
 10. **`conda run` may resolve to wrong env** - If `conda run -n <env>` uses the wrong Python, use the full path instead: `/Users/jh7685/opt/miniconda3/envs/<env>/bin/python`
-11. **`sfp_torch` env for standalone torch notebooks** - The `sfp` env (Python 3.7 + PyTorch 1.13.1) segfaults on macOS 16. Use `sfp_torch` (Python 3.11 + PyTorch 2.2.2 + numpy<2) for notebooks that only need torch/numpy/matplotlib
+11. **`sfp` env: Python 3.8 + torch 2.2.2 + numpy 1.23.5** - After accidental deletion and reinstall, the working sfp env config is: install torch via `conda install -c pytorch pytorch=2.2.2 torchvision=0.17.2`, then `pip install numpy==1.23.5`. numpy 1.21.5 (original) segfaults with torch 2.2.2 on macOS 16; numpy 1.24+ removes `np.float` breaking nibabel. numpy 1.23.5 is the sweet spot.
+12. **Snakefile import order matters for torch** - `from sfp_nsdsyn import *` must appear BEFORE `pickle.HIGHEST_PROTOCOL = 4` in the Snakefile. Setting HIGHEST_PROTOCOL=4 before torch loads causes `AssertionError` in `pickletools.py` because torch expects protocol 5 opcodes during initialization.
+13. **`sfp_torch` env for standalone torch notebooks** - Use `sfp_torch` (Python 3.11 + PyTorch 2.2.2) for notebooks that only need torch/numpy/matplotlib, since it avoids sfp's older package constraints.
 
 
 ---
