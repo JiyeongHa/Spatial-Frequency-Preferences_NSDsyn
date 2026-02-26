@@ -457,6 +457,33 @@ rule shuffle_orientation:
         df = shuffle_betas_within_freq_group(df, groupby_cols=['sub','voxel'], to_shuffle=['betas'])
         df.to_csv(output.shuffled_df, index=False)
 
+
+rule shuffle_eccentricity:
+    """Shuffle eccentricity values across voxels for eccentricity null test."""
+    input:
+        subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'model',
+                               'dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_tavg-False.csv'),
+        precision = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'precision',
+                                 'precision-v_sub-{subj}_roi-{roi}_vs-{vs}.csv')
+    output:
+        shuffled_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm',
+                                   'shuf-eccentricity', '{subj}',
+                                   'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
+    log:
+        os.path.join(config['OUTPUT_DIR'], 'logs', 'dataframes', '{dset}', 'perm',
+                     'shuf-eccentricity', '{subj}',
+                     'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_shuffle.log')
+    run:
+        from sfp_nsdsyn.bootstrapping import shuffle_eccentricities
+        np.random.seed(int(wildcards.perm))
+        subj_df = pd.read_csv(input.subj_df)
+        precision_df = pd.read_csv(input.precision)
+        df = subj_df.merge(precision_df, on=['sub', 'vroinames', 'voxel'])
+        df = df.groupby(['sub', 'voxel', 'class_idx', 'vroinames']).mean().reset_index()
+        df = shuffle_eccentricities(df, groupby_cols=['sub'])
+        df.to_csv(output.shuffled_df, index=False)
+
+
 rule run_model_shuffled_typed:
     """Fit 2D model to shuffled data with shuffle_type in path."""
     input:

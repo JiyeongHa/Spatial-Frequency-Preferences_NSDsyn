@@ -346,6 +346,37 @@ def shuffle_betas_within_freq_group(df, to_shuffle=['betas'],
     return df_shuffled
 
 
+def shuffle_eccentricities(df, groupby_cols=['sub']):
+    """Shuffle eccentricity values across voxels within a group.
+
+    Each voxel has a single eccentricity shared across all stimulus conditions.
+    This randomly reassigns eccentricities across voxels, breaking the
+    voxel-position mapping while preserving all other properties (betas,
+    local_sf, angle, class_idx, etc.).
+
+    Mirrors the MATLAB shuffleEccentricities() approach.
+
+    Args:
+        df: DataFrame with 'voxel' and 'eccentricity' columns.
+            Each voxel must have a consistent eccentricity across all rows.
+        groupby_cols: Groups within which to shuffle independently (default: ['sub']).
+
+    Returns:
+        DataFrame with eccentricity values randomly permuted across voxels.
+    """
+    df_shuffled = df.copy()
+
+    def shuffle_within_group(group):
+        voxel_ecc = group.groupby('voxel')['eccentricity'].first()
+        shuffled_ecc = voxel_ecc.values[np.random.permutation(len(voxel_ecc))]
+        ecc_map = dict(zip(voxel_ecc.index, shuffled_ecc))
+        group['eccentricity'] = group['voxel'].map(ecc_map)
+        return group
+
+    df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
+    return df_shuffled
+
+
 def calculate_error_per_param(df, reference, params=None, metric='mse'):
     """
     Calculate error metric for each parameter between two dataframes.
