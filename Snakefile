@@ -40,9 +40,13 @@ def perm_batch(perm):
     """Return batch subdirectory name for a permutation index (e.g., 0-99 -> 'batch_000')."""
     return f"batch_{int(perm) // 100 * 100:03d}"
 
-def perm_model_pt(dset, subj, perm, lr, max_epoch, roi, vs):
+def perm_model_pt(dset, subj, perm, lr, max_epoch, roi, vs, shuffle_type=None):
     """Build path to a permutation model .pt file, organized into batch subdirectories."""
-    return os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", dset, 'perm', subj,
+    if shuffle_type is None:
+        return os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", dset, 'perm', subj,
+                            perm_batch(perm),
+                            f'perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt')
+    return os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", dset, 'perm', f'shuf-{shuffle_type}', subj,
                         perm_batch(perm),
                         f'perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt')
 
@@ -431,6 +435,58 @@ rule shuffle_df:
         df = df.groupby(['sub','voxel','class_idx','vroinames']).mean().reset_index()
         df = shuffle_class_idx(df, groupby_cols=['sub','voxel'], to_shuffle=['betas'], same_perm=True)
         df.to_csv(output.shuffled_df, index=False)
+
+rule shuffle_orientation:
+    """Shuffle betas within each freq_lvl group (mixtures separate) for orientation null."""
+    input:
+        subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'model', 'dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_tavg-False.csv'),
+        precision = os.path.join(config['OUTPUT_DIR'],'dataframes','{dset}', 'precision', 'precision-v_sub-{subj}_roi-{roi}_vs-{vs}.csv')
+    output:
+        shuffled_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'shuf-orientation', '{subj}',
+                                   'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv'),
+    log:
+        os.path.join(config['OUTPUT_DIR'], 'logs', 'dataframes', '{dset}', 'perm', 'shuf-orientation', '{subj}',
+                     'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_shuffle.log')
+    run:
+        from sfp_nsdsyn.bootstrapping import shuffle_betas_within_freq_group
+        np.random.seed(int(wildcards.perm))
+        subj_df = pd.read_csv(input.subj_df)
+        precision_df = pd.read_csv(input.precision)
+        df = subj_df.merge(precision_df, on=['sub', 'vroinames', 'voxel'])
+        df = df.groupby(['sub','voxel','class_idx','vroinames']).mean().reset_index()
+        df = shuffle_betas_within_freq_group(df, groupby_cols=['sub','voxel'], to_shuffle=['betas'])
+        df.to_csv(output.shuffled_df, index=False)
+
+rule run_model_shuffled_typed:
+    """Fit 2D model to shuffled data with shuffle_type in path."""
+    input:
+        subj_df = os.path.join(config['OUTPUT_DIR'], 'dataframes', '{dset}', 'perm', 'shuf-{shuffle_type}', '{subj}',
+                               'perm-{perm}_dset-{dset}_sub-{subj}_roi-{roi}_vs-{vs}_precision_merged.csv')
+    output:
+        model = os.path.join(config['OUTPUT_DIR'], "sfp_model","results_2D", "{dset}", 'perm', 'shuf-{shuffle_type}', '{subj}', '{batch}',
+                             'perm-{perm}_model-params_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.pt'),
+    log:
+        os.path.join(config['OUTPUT_DIR'], "logs", "sfp_model","results_2D", "{dset}",'perm', 'shuf-{shuffle_type}', '{subj}', '{batch}',
+                     'perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.log'),
+    benchmark:
+        os.path.join(config['OUTPUT_DIR'], "benchmark", "sfp_model","results_2D", "{dset}",'perm', 'shuf-{shuffle_type}', '{subj}', '{batch}',
+                     'perm-{perm}_loss-history_lr-{lr}_eph-{max_epoch}_sub-{subj}_roi-{roi}_vs-{vs}.txt'),
+    resources:
+        cpus_per_task = 1,
+        mem_mb = 4000
+    run:
+        subj_df = pd.read_csv(input.subj_df)
+        subj_model = model.SpatialFrequencyModel()
+        subj_dataset = model.SpatialFrequencyDataset(subj_df, beta_col='betas')
+        loss_history, model_history, _ = model.fit_model(subj_model, subj_dataset,
+                                                         learning_rate=float(wildcards.lr),
+                                                         max_epoch=int(wildcards.max_epoch),
+                                                         save_path=output.model,
+                                                         print_every=10000,
+                                                         loss_all_voxels=False,
+                                                         anomaly_detection=False,
+                                                         amsgrad=False,
+                                                         eps=1e-8)
 
 rule plot_null_param_distributions:
     """Plot null model parameter value distributions with observed values marked."""

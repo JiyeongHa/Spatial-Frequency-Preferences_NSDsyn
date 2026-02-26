@@ -294,6 +294,58 @@ def shuffle_class_idx(df, to_shuffle=['betas'],
     df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
     return df_shuffled
 
+
+def shuffle_betas_within_freq_group(df, to_shuffle=['betas'],
+                                    groupby_cols=['voxel', 'sub']):
+    """Shuffle betas within each frequency group for orientation null test.
+
+    Within each freq_lvl group, betas are permuted across stimulus classes
+    that share the same base frequency. Mixtures (class_idx 24-27) are
+    treated as their own separate group. The same permutation is applied
+    to all voxels (within each freq group).
+
+    This breaks the orientation-response relationship while preserving
+    the frequency-response relationship.
+
+    Args:
+        df: Input dataframe with 'class_idx', 'freq_lvl', and columns to shuffle.
+            Must be averaged across task/phase (1 row per voxel x class_idx).
+        to_shuffle: Column names to shuffle (default: ['betas']).
+        groupby_cols: Columns defining voxel groups (default: ['voxel', 'sub']).
+
+    Returns:
+        DataFrame with betas shuffled within each frequency group.
+    """
+    df_shuffled = df.copy()
+    cols_to_shuffle = [col for col in to_shuffle if col in df_shuffled.columns]
+
+    # Build frequency groups: regular freq_lvl groups + mixtures as separate group
+    # Mixtures (class_idx 24-27) share freq_lvl=3 with regular stimuli,
+    # so we create an explicit group column
+    is_mixture = df_shuffled['class_idx'] >= 24
+    df_shuffled['_freq_group'] = df_shuffled['freq_lvl'].astype(int)
+    df_shuffled.loc[is_mixture, '_freq_group'] = -1  # sentinel for mixtures
+
+    # Generate one permutation per freq group (same perm across all voxels)
+    freq_groups = sorted(df_shuffled['_freq_group'].unique())
+    perm_per_group = {}
+    for fg in freq_groups:
+        n_in_group = df_shuffled.loc[df_shuffled['_freq_group'] == fg, 'class_idx'].nunique()
+        perm_per_group[fg] = np.random.permutation(n_in_group)
+
+    def shuffle_within_voxel(group):
+        group = group.sort_values('class_idx')
+        for fg, perm_idx in perm_per_group.items():
+            mask = group['_freq_group'] == fg
+            for col in cols_to_shuffle:
+                group.loc[mask, col] = group.loc[mask, col].values[perm_idx]
+        return group
+
+    df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_voxel)
+    df_shuffled = df_shuffled.drop(columns='_freq_group')
+    return df_shuffled
+
+
 def calculate_error_per_param(df, reference, params=None, metric='mse'):
     """
     Calculate error metric for each parameter between two dataframes.
