@@ -1857,7 +1857,8 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
 
 def plot_null_param_value_distributions(null_param_df, actual_param_values,
                                         params=None, col_wrap=3, figsize=None,
-                                        bins=20, title=None, save_path=None):
+                                        bins=20, title=None, save_path=None,
+                                        plot_median=False):
     """Plot histograms of null model parameter values with observed values marked.
 
     Parameters
@@ -1879,6 +1880,9 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
         Suptitle for the figure.
     save_path : str, optional
         Path to save the figure.
+    plot_median : bool, optional
+        If True, draw a black dotted vertical line at the median of the null
+        distribution for each parameter. Default False.
 
     Returns
     -------
@@ -1910,6 +1914,9 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
         percentile = np.sum(null_values <= observed_value) / len(null_values) * 100
         ax.axvline(x=observed_value, color='red', linestyle='--',
                    linewidth=2, label=f'{percentile:.2f}%')
+        if plot_median:
+            ax.axvline(x=np.median(null_values), color='black', linestyle=':',
+                       linewidth=1.5, label='median')
         ax.set_title(label)
         ax.set_xlabel('Parameter value')
         ax.set_ylabel('Probability')
