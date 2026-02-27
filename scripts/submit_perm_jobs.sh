@@ -2,8 +2,10 @@
 # Submit all permutation jobs (shuffle + model fitting) to SLURM.
 #
 # Usage:
-#   bash submit_perm_jobs.sh          # submit all jobs
-#   bash submit_perm_jobs.sh --dry    # print sbatch commands without submitting
+#   bash submit_perm_jobs.sh                          # perms 0-99 (default)
+#   bash submit_perm_jobs.sh --perm-range 100-199     # perms 100-199
+#   bash submit_perm_jobs.sh --dry                    # dry-run (no submission)
+#   bash submit_perm_jobs.sh --dry --perm-range 100-199
 #
 # Prerequisites:
 #   - conda env 'sfp' available on HPC
@@ -12,7 +14,7 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────
-REPO_DIR="/home/jh7685/spatial-frequency-preferences_NSDsyn"
+REPO_DIR="/home/jh7685/Spatial-frequency-preferences_NSDsyn"
 OUTPUT_DIR="/scratch/jh7685/projects/sfp_nsd/derivatives"
 SCRIPT="${REPO_DIR}/scripts/run_perm_job.py"
 LOG_DIR="${OUTPUT_DIR}/logs/slurm/perm"
@@ -28,11 +30,19 @@ SING="singularity exec --overlay ${OVERLAY}:ro ${SIF}"
 SUBJECTS=(subj01 subj02 subj03 subj04 subj05 subj06 subj07 subj08)
 ROIS=(V1)
 SHUFFLE_TYPES=(orientation eccentricity)
-PERM_RANGE="0-99"
 
+# ── Parse CLI arguments ───────────────────────────────────────────────────
+PERM_RANGE="0-99"
 DRY_RUN=false
-if [[ "${1:-}" == "--dry" ]]; then
-    DRY_RUN=true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --perm-range) PERM_RANGE="$2"; shift 2 ;;
+        --dry)        DRY_RUN=true; shift ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+done
+
+if $DRY_RUN; then
     echo "=== DRY RUN — no jobs will be submitted ==="
 fi
 
