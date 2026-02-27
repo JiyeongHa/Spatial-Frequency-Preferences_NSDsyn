@@ -375,6 +375,40 @@ def shuffle_eccentricities(df, groupby_cols=['sub']):
     return df_shuffled
 
 
+def shuffle_local_sf(df, groupby_cols=['sub']):
+    """Shuffle local_sf across stimulus classes, same permutation for all voxels.
+
+    Each voxel has 28 stimulus classes with different local_sf values.
+    This randomly permutes which stimulus class gets which local_sf,
+    using the SAME permutation for all voxels within a group.
+
+    Mirrors the MATLAB shuffleSpatialFrequencies() approach.
+
+    Args:
+        df: DataFrame with 'voxel', 'class_idx', and 'local_sf' columns.
+            Must have one row per (voxel, class_idx).
+        groupby_cols: Groups within which to shuffle independently (default: ['sub']).
+
+    Returns:
+        DataFrame with local_sf values permuted across stimulus classes.
+    """
+    df_shuffled = df.copy()
+
+    def shuffle_within_group(group):
+        class_indices = np.sort(group['class_idx'].unique())
+        perm = np.random.permutation(len(class_indices))
+        class_perm_map = dict(zip(class_indices, class_indices[perm]))
+
+        sf_lookup = group.set_index(['voxel', 'class_idx'])['local_sf']
+        permuted_class = group['class_idx'].map(class_perm_map)
+        idx = pd.MultiIndex.from_arrays([group['voxel'], permuted_class])
+        group['local_sf'] = sf_lookup.reindex(idx).values
+        return group
+
+    df_shuffled = df_shuffled.groupby(groupby_cols, group_keys=False).apply(shuffle_within_group)
+    return df_shuffled
+
+
 def calculate_error_per_param(df, reference, params=None, metric='mse'):
     """
     Calculate error metric for each parameter between two dataframes.
