@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import random
 from pathlib import Path
-import nibabel as nib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
