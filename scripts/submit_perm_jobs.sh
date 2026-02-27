@@ -17,6 +17,9 @@ OUTPUT_DIR="/scratch/jh7685/projects/sfp_nsd/derivatives"
 SCRIPT="${REPO_DIR}/scripts/run_perm_job.py"
 LOG_DIR="${OUTPUT_DIR}/logs/slurm/perm"
 
+# SLURM account
+ACCOUNT="torch_pr_506_general"
+
 # Singularity settings
 OVERLAY="/scratch/jh7685/overlay/sfp/overlay-25GB-500K.ext3"
 SIF="/share/apps/images/ubuntu-22.04.4.sif"
@@ -69,6 +72,7 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
 
             # ── Shuffle array job ────────────────────────────────────
             SHUF_CMD="sbatch \
+                --account=${ACCOUNT} \
                 --job-name=shuf_${SHUF}_${SUBJ}_${ROI} \
                 --array=${PERM_RANGE} \
                 --nodes=1 --ntasks=1 --cpus-per-task=1 \
@@ -89,6 +93,7 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
             fi
 
             MODEL_CMD="sbatch \
+                --account=${ACCOUNT} \
                 --job-name=model_${SHUF}_${SUBJ}_${ROI} \
                 --array=${PERM_RANGE} \
                 --nodes=1 --ntasks=1 --cpus-per-task=1 \
