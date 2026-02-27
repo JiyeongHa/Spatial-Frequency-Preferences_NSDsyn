@@ -72,10 +72,10 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
                 --job-name=shuf_${SHUF}_${SUBJ}_${ROI} \
                 --array=${PERM_RANGE} \
                 --nodes=1 --ntasks=1 --cpus-per-task=1 \
-                --mem=2G --time=01:00:00 \
+                --mem=4G --time=01:00:00 \
                 --output=${SHUF_LOG}/${ROI}_%a.out \
                 --error=${SHUF_LOG}/${ROI}_%a.err \
-                --wrap=\"${SING} /bin/bash -c 'source /ext3/env.sh && python ${SCRIPT} shuffle \
+                --wrap=\"module purge; ${SING} /bin/bash -c 'source /ext3/env.sh; python ${SCRIPT} shuffle \
                     --shuffle-type ${SHUF} --subj ${SUBJ} --roi ${ROI} \
                     --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}'\""
 
@@ -92,11 +92,11 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
                 --job-name=model_${SHUF}_${SUBJ}_${ROI} \
                 --array=${PERM_RANGE} \
                 --nodes=1 --ntasks=1 --cpus-per-task=1 \
-                --mem=4G --time=08:00:00 \
+                --mem=8G --time=08:00:00 \
                 ${DEP_FLAG} \
                 --output=${MODEL_LOG}/${ROI}_%a.out \
                 --error=${MODEL_LOG}/${ROI}_%a.err \
-                --wrap=\"${SING} /bin/bash -c 'source /ext3/env.sh && python ${SCRIPT} model \
+                --wrap=\"module purge; ${SING} /bin/bash -c 'source /ext3/env.sh; python ${SCRIPT} model \
                     --shuffle-type ${SHUF} --subj ${SUBJ} --roi ${ROI} \
                     --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}'\""
 
