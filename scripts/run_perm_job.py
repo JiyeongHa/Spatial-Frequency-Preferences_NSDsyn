@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Standalone worker script for permutation test jobs (replaces Snakemake rules).
 
-Replicates three Snakemake rules:
+Replicates four Snakemake rules:
   - shuffle_orientation
   - shuffle_eccentricity
+  - shuffle_local_sf
   - run_model_shuffled_typed
 
 Usage:
@@ -58,7 +59,8 @@ def model_output_path(output_dir, dset, subj, roi, vs, perm, shuffle_type, lr, m
 def run_shuffle(args):
     """Replicate shuffle_orientation / shuffle_eccentricity Snakemake rules."""
     from sfp_nsdsyn.bootstrapping import (shuffle_betas_within_freq_group,
-                                          shuffle_eccentricities)
+                                          shuffle_eccentricities,
+                                          shuffle_local_sf)
 
     subj_df_path, precision_path = shuffle_input_paths(
         args.output_dir, args.dset, args.subj, args.roi, args.vs)
@@ -88,6 +90,8 @@ def run_shuffle(args):
         df = shuffle_betas_within_freq_group(df, groupby_cols=['sub', 'voxel'], to_shuffle=['betas'])
     elif args.shuffle_type == 'eccentricity':
         df = shuffle_eccentricities(df, groupby_cols=['sub'])
+    elif args.shuffle_type == 'local_sf':
+        df = shuffle_local_sf(df, groupby_cols=['sub'])
     else:
         sys.exit(f"Unknown shuffle_type: {args.shuffle_type}")
 
@@ -141,7 +145,7 @@ def parse_args():
 
     # Common args for both steps
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--shuffle-type', required=True, choices=['orientation', 'eccentricity'])
+    common.add_argument('--shuffle-type', required=True, choices=['orientation', 'eccentricity', 'local_sf'])
     common.add_argument('--subj', required=True, help='Subject ID, e.g. subj01')
     common.add_argument('--roi', required=True, help='ROI, e.g. V1')
     common.add_argument('--perm', required=True, type=int, help='Permutation index (0-99)')
