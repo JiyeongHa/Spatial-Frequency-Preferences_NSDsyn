@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────
-REPO_DIR="/home/jh7685/Spatial-frequency-preferences_NSDsyn"
+REPO_DIR="/home/jh7685/Spatial-Frequency-Preferences_NSDsyn"
 OUTPUT_DIR="/scratch/jh7685/projects/sfp_nsd/derivatives"
 SCRIPT="${REPO_DIR}/scripts/run_perm_job.py"
 LOG_DIR="${OUTPUT_DIR}/logs/slurm/perm"
