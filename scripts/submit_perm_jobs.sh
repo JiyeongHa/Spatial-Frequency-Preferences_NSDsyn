@@ -17,6 +17,11 @@ OUTPUT_DIR="/scratch/jh7685/projects/sfp_nsd/derivatives"
 SCRIPT="${REPO_DIR}/scripts/run_perm_job.py"
 LOG_DIR="${OUTPUT_DIR}/logs/slurm/perm"
 
+# Singularity settings
+OVERLAY="/scratch/jh7685/overlay/sfp/overlay-25GB-500K.ext3"
+SIF="/share/apps/images/ubuntu-22.04.4.sif"
+SING="singularity exec --overlay ${OVERLAY}:ro ${SIF}"
+
 SUBJECTS=(subj01 subj02 subj03 subj04 subj05 subj06 subj07 subj08)
 ROIS=(V1 V2 V3)
 SHUFFLE_TYPES=(orientation eccentricity)
@@ -70,9 +75,9 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
                 --mem=2G --time=01:00:00 \
                 --output=${SHUF_LOG}/${ROI}_%a.out \
                 --error=${SHUF_LOG}/${ROI}_%a.err \
-                --wrap=\"source ~/.bashrc && conda activate sfp && python ${SCRIPT} shuffle \
+                --wrap=\"${SING} /bin/bash -c 'source /ext3/env.sh && python ${SCRIPT} shuffle \
                     --shuffle-type ${SHUF} --subj ${SUBJ} --roi ${ROI} \
-                    --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}\""
+                    --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}'\""
 
             SHUF_JOB_ID=$(submit_or_print "$SHUF_CMD")
             echo "  [shuffle] ${SHUF} subj=${SUBJ} roi=${ROI} -> job ${SHUF_JOB_ID}"
@@ -91,9 +96,9 @@ for SHUF in "${SHUFFLE_TYPES[@]}"; do
                 ${DEP_FLAG} \
                 --output=${MODEL_LOG}/${ROI}_%a.out \
                 --error=${MODEL_LOG}/${ROI}_%a.err \
-                --wrap=\"source ~/.bashrc && conda activate sfp && python ${SCRIPT} model \
+                --wrap=\"${SING} /bin/bash -c 'source /ext3/env.sh && python ${SCRIPT} model \
                     --shuffle-type ${SHUF} --subj ${SUBJ} --roi ${ROI} \
-                    --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}\""
+                    --perm \\\$SLURM_ARRAY_TASK_ID --output-dir ${OUTPUT_DIR}'\""
 
             MODEL_JOB_ID=$(submit_or_print "$MODEL_CMD")
             echo "  [model]   ${SHUF} subj=${SUBJ} roi=${ROI} -> job ${MODEL_JOB_ID} (after ${SHUF_JOB_ID})"
