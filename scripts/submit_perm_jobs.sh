@@ -23,7 +23,7 @@ SIF="/share/apps/images/ubuntu-22.04.4.sif"
 SING="singularity exec --overlay ${OVERLAY}:ro ${SIF}"
 
 SUBJECTS=(subj01 subj02 subj03 subj04 subj05 subj06 subj07 subj08)
-ROIS=(V1 V2 V3)
+ROIS=(V1)
 SHUFFLE_TYPES=(orientation eccentricity)
 PERM_RANGE="0-99"
 
