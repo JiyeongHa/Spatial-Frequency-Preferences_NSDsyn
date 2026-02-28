@@ -21,7 +21,7 @@ SING="singularity exec --overlay ${OVERLAY}:ro ${SIF}"
 
 SUBJECTS=(subj01 subj02 subj03 subj04 subj05 subj06 subj07 subj08)
 ROIS=(V1)
-SHUFFLE_TYPES=(orientation eccentricity)
+SHUFFLE_TYPES=(local_sf eccentricity)
 DSET="nsdsyn"
 VS="pRFsize"
 
