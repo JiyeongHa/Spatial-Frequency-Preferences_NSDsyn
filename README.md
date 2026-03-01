@@ -21,19 +21,44 @@ Table of Contents
     * [Reproducing the figures](#reproducing-the-figures)
 
 # Dependencies
-All of the code in this repository is written in Python (3.7 and 3.8). To reproduce the python environment, we recommend using Conda to manage the dependencies.
+All code is written in Python 3.8. We use [mamba](https://github.com/mamba-org/mamba) (a faster drop-in replacement for conda) to manage dependencies.
 
-## Conda environment 
-1. Install [miniconda](https://docs.conda.io/en/latest/miniconda.html) for your
-   system with the appropriate python version.
-2. Install [mamba](https://github.com/mamba-org/mamba): `conda install mamba
-  -n base -c conda-forge`
-3. Download this github repository: `git clone git@github.com:JiyeongHa/Spatial-Frequency-Preference_NSDsyn.git`
-4. move to where the repository is downloded: `cd path/to/sfp`
-5. run `mamba env create -f environment.yml`.
-6. Type `conda activate sfp` to activate this environment
-   and all required packages will be available.
-   
+## Environment setup
+
+1. Install [Miniforge](https://github.com/conda-forge/miniforge#install) (comes with `conda` and `mamba` pre-installed).
+   If you already have Miniconda/Anaconda, install mamba into your base env instead:
+   ```bash
+   conda install mamba -n base -c conda-forge
+   ```
+
+2. Clone and enter the repository:
+   ```bash
+   git clone git@github.com:JiyeongHa/Spatial-Frequency-Preference_NSDsyn.git
+   cd Spatial-Frequency-Preference_NSDsyn
+   ```
+
+3. Create the environment:
+   ```bash
+   mamba env create -f environment.yml
+   ```
+
+4. Activate and install the local package:
+   ```bash
+   conda activate sfp
+   pip install -e .
+   ```
+
+5. Verify the setup:
+   ```bash
+   python verify_env.py
+   ```
+   All checks should show `[PASS]`. See [Troubleshooting](#troubleshooting) if any fail.
+
+6. Configure data paths by editing `config.json`:
+   - `NSD_DIR`: path to NSD synthetic dataset
+   - `OUTPUT_DIR`: path for analysis outputs
+   - `BRODERICK_DIR`: path to Broderick dataset
+
    
 # Data 
 ## NSD synthetic data
