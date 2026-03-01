@@ -42,19 +42,25 @@ All code is written in Python 3.8. We use [mamba](https://github.com/mamba-org/m
    mamba env create -f environment.yml
    ```
 
-4. Activate and install the local package:
+4. Activate the environment:
    ```bash
    conda activate sfp
-   pip install -e .
    ```
 
-5. Verify the setup:
+5. *(Optional)* Install the local `sfp_nsdsyn` package in editable mode:
+   ```bash
+   pip install -e .
+   ```
+   This is only needed if you want to import `sfp_nsdsyn` from outside the project root directory.
+   If you always run scripts from the project root (e.g., via Snakemake), you can skip this step.
+
+6. Verify the setup:
    ```bash
    python verify_env.py
    ```
    All checks should show `[PASS]`. See [Troubleshooting](#troubleshooting) if any fail.
 
-6. Configure data paths by editing `config.json`:
+7. Configure data paths by editing `config.json`:
    - `NSD_DIR`: path to NSD synthetic dataset
    - `OUTPUT_DIR`: path for analysis outputs
    - `BRODERICK_DIR`: path to Broderick dataset
