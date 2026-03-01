@@ -18,3 +18,4 @@ notebooks/.ipynb_checkpoints/
 /test_run.log
 /test_shell.log
 /config.json
+sfp_nsdsyn.egg-info/
