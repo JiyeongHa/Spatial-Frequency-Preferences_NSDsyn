@@ -121,6 +121,7 @@ from seaborn.algorithms import bootstrap  # works in 0.11–0.13
 
 def _change_params_to_math_symbols(params_col):
     mapping = {'sigma': r"$Bandwidth$" "\n" r"$\sigma$",
+               '1/sigma': r"$1/Bandwidth$" "\n" r"$1/\sigma$",
                'slope': r"$Slope$" "\n" r"$m$",
                'intercept': r"$Intercept$" "\n" r"$b$",
                'p_1': r"$p_1$",
@@ -1858,7 +1859,7 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
 def plot_null_param_value_distributions(null_param_df, actual_param_values,
                                         params=None, col_wrap=3, figsize=None,
                                         bins=20, title=None, save_path=None,
-                                        plot_median=False):
+                                        plot_median=False, include_zero=False):
     """Plot histograms of null model parameter values with observed values marked.
 
     Parameters
@@ -1921,6 +1922,9 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
         ax.set_xlabel('Parameter value')
         ax.set_ylabel('Probability')
         ax.set_ylim(0, ax.get_ylim()[1] * 1.03)
+        if include_zero:
+            lo, hi = ax.get_xlim()
+            ax.set_xlim(min(lo, 0), max(hi, 0))
         ax.legend(fontsize=8, frameon=False)
 
     for i in range(n_params, len(axes)):
@@ -2024,7 +2028,9 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                                      params=None, col_wrap=4, bins=50,
                                      logscale=True, title=None, figsize=None,
                                      xlabel_params='Standardized Squared Error',
-                                     color_by_param=False, save_path=None):
+                                     color_by_param=False, save_path=None,
+                                     scatter_params=None, share_param_axes=True,
+                                     param_positions=None):
     """
     Plot combined per-parameter error histograms, MSE, correlation, and scatter.
 
@@ -2072,17 +2078,27 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     save_path : str, optional
         Path to save the figure.
 
+    param_positions : dict, optional
+        Explicit {param_name: (row, col)} mapping for subplot placement.
+        When None, parameters are laid out sequentially with col_wrap.
+
     Returns
     -------
     fig, axes_dict : matplotlib figure and dict mapping param names to axes
     """
     if params is None:
-        params = ['slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
 
     n_params = len(params)
-    n_param_rows = int(np.ceil(n_params / col_wrap))
     has_corr = (null_corr_values is not None and actual_corr is not None)
     has_scatter = (nsd_std_means is not None and brod_std_means is not None)
+
+    # Resolve param positions
+    if param_positions is None:
+        param_positions = {}
+        for i, param in enumerate(params):
+            param_positions[param] = (i // col_wrap, i % col_wrap)
+    n_param_rows = max(r for r, c in param_positions.values()) + 1
 
     # Style
     rc.update({'font.size': 8, 'axes.titlesize': 8, 'axes.labelpad': 2,
@@ -2104,11 +2120,6 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                           height_ratios=height_ratios,
                           hspace=0.8, wspace=0.3)
 
-    # Create param axes (flat params with col_wrap)
-    param_positions = {}
-    for i, param in enumerate(params):
-        param_positions[param] = (i // col_wrap, i % col_wrap)
-
     param_label_map = dict(zip(params, _change_params_to_math_symbols(params)))
 
     axes_dict = {}
@@ -2120,17 +2131,17 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         if first_ax is None:
             ax = fig.add_subplot(gs[row, col])
             first_ax = ax
-        else:
+        elif share_param_axes:
             ax = fig.add_subplot(gs[row, col], sharex=first_ax, sharey=first_ax)
+        else:
+            ax = fig.add_subplot(gs[row, col])
         axes_dict[param] = ax
         row_axes[row].append(ax)
 
     # Plot per-parameter histograms
+    text_loc_overrides = {'slope': .3, 'A_1': .3, 'A_2': .3, 'p_3': .3}
     for i, param in enumerate(params):
-        if i in [1, 5, 6, 7]:
-            text_loc = .3
-        else:
-            text_loc = .25
+        text_loc = text_loc_overrides.get(param, .25)
         _plot_histogram(
             axes_dict[param],
             null_errors_df[param].values,
@@ -2140,15 +2151,19 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
             show_label=False, text_fontsize=8
         )
 
-    first_ax.set_ylim(0.0, 0.09)
-    first_ax.set_xlim(left=1e-6)
+    if share_param_axes:
+        first_ax.set_ylim(0.0, 0.09)
+        first_ax.set_xlim(left=1e-6)
 
     # Clean up xlabel/ylabel on param axes
-    last_param_row = n_param_rows - 1
+    # Find bottom-most occupied row per column for xlabel placement
+    col_max_row = {}
+    for r, c in param_positions.values():
+        col_max_row[c] = max(col_max_row.get(c, -1), r)
     for param in params:
         ax = axes_dict[param]
         row, col = param_positions[param]
-        if row < last_param_row:
+        if row < col_max_row[col]:
             ax.set_xlabel('')
         if col > 0:
             ax.set_ylabel('')
@@ -2194,9 +2209,10 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         ax_corr.set_xlabel(ax_corr.get_xlabel(), fontsize=8)
 
     # Observed scatter at [scatter_row, 0:2]
+    _scatter_params = scatter_params if scatter_params is not None else params
     if has_scatter:
         ax_scatter_obs = fig.add_subplot(gs[scatter_row, 0:2])
-        _plot_scatter(ax_scatter_obs, brod_std_means, nsd_std_means, params,
+        _plot_scatter(ax_scatter_obs, brod_std_means, nsd_std_means, _scatter_params,
                       color_by_param=color_by_param,
                       xlabel='Broderick et al. V1', ylabel='NSD V1')
         axes_dict['scatter_obs'] = ax_scatter_obs
@@ -2213,7 +2229,7 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     if null_std_means_example is not None and brod_std_means is not None:
         ax_scatter_perm = fig.add_subplot(gs[scatter_row:scatter_row+1, 2:col_wrap])
         _plot_scatter(ax_scatter_perm, brod_std_means, null_std_means_example,
-                      params, color_by_param=color_by_param,
+                      _scatter_params, color_by_param=color_by_param,
                       xlabel='Broderick et al. V1', ylabel='Permuted NSD V1')
         axes_dict['scatter_perm'] = ax_scatter_perm
         if null_corr_example is not None:

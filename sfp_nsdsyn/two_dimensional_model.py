@@ -388,20 +388,21 @@ def load_SpatialFrequencyModel(pt_file_path):
     model.eval()
     return model
 
-def model_to_df(pt_file_path, *args):
+def model_to_df(pt_file_path, *args, params=None):
     model = load_SpatialFrequencyModel(pt_file_path)
     model_dict = {}
     for name, param in model.named_parameters():
-        model_dict[name] = param.detach().numpy()
+        if params is None or name in params:
+            model_dict[name] = param.detach().numpy()
     model_df = pd.DataFrame(model_dict)
+    cur_pt_file = pt_file_path.split('/')[-1]
     for arg in args:
-        cur_pt_file = pt_file_path.split('/')[-1]
         model_df[utils.match_wildcards_with_col(arg)] = [k for k in cur_pt_file.split('_') if arg in k][0][len(arg)+1:].replace('-', ' ')
     return model_df
 
-def load_all_models(pt_file_path_list, *args):
-    model_df = pd.DataFrame({})
-    for pt_file_path in pt_file_path_list:
-        tmp = model_to_df(pt_file_path, *args)
-        model_df = pd.concat((model_df, tmp), axis=0)
-    return model_df
+def load_all_models(pt_file_path_list, *args, params=None):
+    dfs = [model_to_df(pt_file_path, *args, params=params)
+           for pt_file_path in pt_file_path_list]
+    if not dfs:
+        return pd.DataFrame({})
+    return pd.concat(dfs, ignore_index=True)
