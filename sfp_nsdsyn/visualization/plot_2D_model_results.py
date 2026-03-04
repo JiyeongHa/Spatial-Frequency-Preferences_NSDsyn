@@ -1836,12 +1836,12 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
         ax.axvline(x=observed_value, color='red', linestyle='--',
                    linewidth=2, label=f'{percentile:.2f}%')
         ax.set_title(label)
-        ax.set_xlabel('Squared Error with Broderick et al. V1')
+        ax.set_xlabel('Squared Error', fontsize=rc['axes.labelsize'])
         ax.set_ylabel('Probability')
         ax.set_ylim(0, ax.get_ylim()[1]*1.03)
         if logscale:
             ax.set_xscale('log', base=10)
-        ax.legend(fontsize=8, frameon=False)
+        ax.legend(fontsize=rc['legend.fontsize'], frameon=False)
 
     # Hide unused subplots
     for i in range(n_params, len(axes)):
@@ -1857,9 +1857,11 @@ def plot_null_distribution_per_param(null_errors_df, actual_errors, params=None,
 
 
 def plot_null_param_value_distributions(null_param_df, actual_param_values,
+                                        broderick_param_values=None,
                                         params=None, col_wrap=3, figsize=None,
                                         bins=20, title=None, save_path=None,
-                                        plot_median=False, include_zero=False):
+                                        plot_median=False, include_zero=False,
+                                        share_groups=None):
     """Plot histograms of null model parameter values with observed values marked.
 
     Parameters
@@ -1869,6 +1871,9 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
         (mean across subjects per permutation).
     actual_param_values : dict or pd.Series
         Observed mean parameter value for each parameter.
+    broderick_param_values : dict or pd.Series, optional
+        Broderick et al. mean parameter value for each parameter.
+        If provided, draw a black dashed vertical line.
     params : list of str, optional
         Parameters to plot. Defaults to 9 standard params.
     col_wrap : int
@@ -1884,6 +1889,11 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
     plot_median : bool, optional
         If True, draw a black dotted vertical line at the median of the null
         distribution for each parameter. Default False.
+    include_zero : bool, optional
+        If True, extend x-axis to include zero. Default False.
+    share_groups : list of list of str, optional
+        Groups of parameter names that should share x and y axis ranges.
+        E.g., [['p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']].
 
     Returns
     -------
@@ -1903,29 +1913,47 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
     axes = axes.flatten()
 
     param_labels = _change_params_to_math_symbols(params)
+    param_to_ax = {}
 
     for i, (param, label) in enumerate(zip(params, param_labels)):
         ax = axes[i]
+        param_to_ax[param] = ax
         null_values = null_param_df[param].values
         observed_value = actual_param_values[param]
         weights = np.ones_like(null_values) / len(null_values)
 
         ax.hist(null_values, bins=bins, color='gray', weights=weights,
-                alpha=0.7, edgecolor='gray')
-        percentile = np.sum(null_values <= observed_value) / len(null_values) * 100
+                alpha=0.7, edgecolor='gray', label='Shuffled NSD')
         ax.axvline(x=observed_value, color='red', linestyle='--',
-                   linewidth=2, label=f'{percentile:.2f}%')
+                   linewidth=2, label='NSD V1')
+        if broderick_param_values is not None:
+            ax.axvline(x=broderick_param_values[param], color='black',
+                       linestyle='--', linewidth=2, label='Broderick et al. V1')
         if plot_median:
             ax.axvline(x=np.median(null_values), color='black', linestyle=':',
                        linewidth=1.5, label='median')
         ax.set_title(label)
-        ax.set_xlabel('Parameter value')
-        ax.set_ylabel('Probability')
         ax.set_ylim(0, ax.get_ylim()[1] * 1.03)
         if include_zero:
             lo, hi = ax.get_xlim()
             ax.set_xlim(min(lo, 0), max(hi, 0))
-        ax.legend(fontsize=8, frameon=False)
+        if i == col_wrap - 1:
+            ax.legend(fontsize=11, frameon=False, loc='center left',
+                      bbox_to_anchor=(1.02, 0.5))
+
+    # Apply shared axis ranges within groups
+    if share_groups is not None:
+        for group in share_groups:
+            group_axes = [param_to_ax[p] for p in group if p in param_to_ax]
+            if len(group_axes) < 2:
+                continue
+            xlims = [ax.get_xlim() for ax in group_axes]
+            ylims = [ax.get_ylim() for ax in group_axes]
+            shared_xlim = (min(lo for lo, _ in xlims), max(hi for _, hi in xlims))
+            shared_ylim = (min(lo for lo, _ in ylims), max(hi for _, hi in ylims))
+            for ax in group_axes:
+                ax.set_xlim(shared_xlim)
+                ax.set_ylim(shared_ylim)
 
     for i in range(n_params, len(axes)):
         axes[i].set_visible(False)
@@ -1933,6 +1961,8 @@ def plot_null_param_value_distributions(null_param_df, actual_param_values,
     if title is not None:
         fig.suptitle(f'{title}\n', fontsize=15, y=0.96)
 
+    fig.supxlabel('Parameter value', fontsize=11)
+    fig.supylabel('Probability', fontsize=11)
     plt.tight_layout()
     utils.save_fig(save_path)
 
@@ -1951,7 +1981,7 @@ def _compute_histogram_bins(values, bins=50, logscale=True):
 
 def _plot_histogram(ax, null_values, observed_value, color='gray',
                     bins=50, logscale=True, text_loc=.25, title=None, xlabel='Squared Error',
-                    higher_is_better=False, show_label=True, text_fontsize=11):
+                    show_label=True, text_fontsize=11):
     """Plot histogram with observed value line and percentile text."""
     weights = np.ones_like(null_values) / len(null_values)
     bin_edges = _compute_histogram_bins(null_values, bins, logscale)
@@ -1959,11 +1989,8 @@ def _plot_histogram(ax, null_values, observed_value, color='gray',
     ax.hist(null_values, bins=bin_edges, color=color, weights=weights,
             alpha=0.7, edgecolor=color)
     all_values = np.append(null_values, observed_value)
-    if higher_is_better:
-        percentile = np.mean(all_values >= observed_value) * 100
-    else:
-        percentile = np.mean(all_values <= observed_value) * 100
-    ax.axvline(x=observed_value, color='red', linestyle='--', linewidth=2)
+    percentile = np.mean(all_values <= observed_value) * 100
+    ax.axvline(x=observed_value, color='red', linestyle='--', linewidth=1.5)
     text = f'{percentile:.1f}%' if show_label else f'{percentile:.1f}%'
     ax.text(text_loc, 0.95, text,
             transform=ax.transAxes, fontsize=text_fontsize,
@@ -1977,46 +2004,79 @@ def _plot_histogram(ax, null_values, observed_value, color='gray',
         ax.set_xscale('log', base=10)
 
 
-def _sync_row_xlim(axes_list):
-    """Synchronize x-axis limits across axes in the same row."""
-    if not axes_list:
-        return
-    all_xlim = [ax.get_xlim() for ax in axes_list]
-    xmin = min(lim[0] for lim in all_xlim)
-    xmax = max(lim[1] for lim in all_xlim)
-    for ax in axes_list:
-        ax.set_xlim(xmin, xmax)
 
 
 def _plot_scatter(ax, x_vals, y_vals, params, color_by_param=False,
-                  xlabel='', ylabel=''):
-    """Plot scatter of standardized parameter means with y=x identity line."""
+                  xlabel='', ylabel='', xlim=None, xticks=None,
+                  x_err=None, y_err=None, show_legend=False):
+    """Plot scatter of standardized parameter means with y=x identity line.
+
+    Args:
+        x_err: optional 2xN array [[lower_err], [upper_err]] for x error bars
+        y_err: optional 2xN array [[lower_err], [upper_err]] for y error bars
+        show_legend: bool, if True show a stepped colorbar legend (only when
+            color_by_param is also True).
+    """
+    from matplotlib.colors import ListedColormap, BoundaryNorm
     x_vals = np.asarray(x_vals)
     y_vals = np.asarray(y_vals)
     param_labels = _change_params_to_math_symbols(params)
 
+    has_err = x_err is not None or y_err is not None
     if color_by_param:
-        colors = plt.cm.tab10(np.arange(len(params)))
-        for i in range(len(params)):
-            label = param_labels[i].replace('\n', ' ')
-            ax.scatter(x_vals[i], y_vals[i], color=colors[i],
-                       label=label, s=20, zorder=3, edgecolors='none')
-        ax.legend(fontsize=6, loc='upper left', frameon=False)
+        n = len(params)
+        colors = plt.cm.tab10(np.arange(n))
+        for i in range(n):
+            if has_err:
+                xerr_i = [[x_err[0][i]], [x_err[1][i]]] if x_err is not None else None
+                yerr_i = [[y_err[0][i]], [y_err[1][i]]] if y_err is not None else None
+                ax.errorbar(x_vals[i], y_vals[i], xerr=xerr_i, yerr=yerr_i,
+                            color=colors[i], fmt='o', ms=2.5, zorder=3,
+                            capsize=0, elinewidth=0.8)
+            else:
+                ax.scatter(x_vals[i], y_vals[i], color=colors[i],
+                           s=10, zorder=3, edgecolors='none')
+        if show_legend:
+            cmap = ListedColormap(colors)
+            bounds = np.arange(n + 1)
+            norm = BoundaryNorm(bounds, cmap.N)
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            cbar = ax.figure.colorbar(sm, ax=ax, ticks=np.arange(n) + 0.5,
+                                      spacing='uniform', shrink=0.9, pad=0.02,
+                                      aspect=30)
+            cbar.ax.set_yticklabels(
+                [l.replace('\n', ' ') for l in param_labels], fontsize=7)
+            cbar.ax.invert_yaxis()
+            cbar.ax.tick_params(length=0)
+            cbar.outline.set_linewidth(0.5)
     else:
-        ax.scatter(x_vals, y_vals, color='black', s=20, zorder=3,
-                   edgecolors='none')
+        if has_err:
+            ax.errorbar(x_vals, y_vals, xerr=x_err, yerr=y_err,
+                        color='black', fmt='o', ms=2, zorder=3,
+                        capsize=0, elinewidth=0.8)
+        else:
+            ax.scatter(x_vals, y_vals, color='black', s=8, zorder=3,
+                       edgecolors='none')
 
-    all_vals = np.concatenate([x_vals.ravel(), y_vals.ravel()])
-    lo, hi = np.min(all_vals), np.max(all_vals)
-    margin = (hi - lo) * 0.15
-    lo, hi = lo - margin, hi + margin
+    if xlim is not None:
+        lo, hi = xlim
+    else:
+        all_vals = np.concatenate([x_vals.ravel(), y_vals.ravel()])
+        lo, hi = np.min(all_vals), np.max(all_vals)
+        margin = (hi - lo) * 0.15
+        lo, hi = lo - margin, hi + margin
     ax.plot([lo, hi], [lo, hi], 'k:', linewidth=0.8, zorder=1, label='y = x')
     ax.set_xlim([lo, hi])
     ax.set_ylim([lo, hi])
-    ax.set_xlabel(xlabel, fontsize=8)
-    ax.set_ylabel(ylabel, fontsize=8)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
     ax.set_aspect('equal', adjustable='box')
-    ax.set_yticks(ax.get_xticks())
+    if xticks is not None:
+        ax.set_xticks(xticks)
+        ax.set_yticks(xticks)
+    else:
+        ax.set_yticks(ax.get_xticks())
     ax.set_ylim([lo, hi])
 
 
@@ -2030,7 +2090,10 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                                      xlabel_params='Standardized Squared Error',
                                      color_by_param=False, save_path=None,
                                      scatter_params=None, share_param_axes=True,
-                                     param_positions=None):
+                                     param_positions=None,
+                                     share_groups=None,
+                                     obs_x_err=None, obs_y_err=None,
+                                     perm_x_err=None, perm_y_err=None):
     """
     Plot combined per-parameter error histograms, MSE, correlation, and scatter.
 
@@ -2081,6 +2144,11 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     param_positions : dict, optional
         Explicit {param_name: (row, col)} mapping for subplot placement.
         When None, parameters are laid out sequentially with col_wrap.
+    share_groups : list of list of str, optional
+        Groups of parameter names that should share x-axes. Each inner list
+        defines a group whose subplots will have linked x-axes.
+        E.g., [['p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']] links those six.
+        Overrides share_param_axes for the specified groups.
 
     Returns
     -------
@@ -2101,10 +2169,10 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     n_param_rows = max(r for r, c in param_positions.values()) + 1
 
     # Style
-    rc.update({'font.size': 8, 'axes.titlesize': 8, 'axes.labelpad': 2,
-               'axes.linewidth': 0.8, 'xtick.major.width': 0.8,
-               'ytick.major.width': 0.8, 'axes.labelsize': 8,
-               'xtick.labelsize': 6, 'ytick.labelsize': 6,
+    rc.update({'font.size': 9, 'axes.titlesize': 9, 'axes.labelpad': 2,
+               'axes.linewidth': 0.9, 'xtick.major.width': 0.9,
+               'ytick.major.width': 0.9, 'axes.labelsize': 9,
+               'xtick.labelsize': 7, 'ytick.labelsize': 7,
                'xtick.major.pad': 2, 'ytick.major.pad': 2})
     sns.set_theme("paper", style='ticks', rc=rc)
 
@@ -2113,7 +2181,7 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     height_ratios = [1] * n_param_rows + [1.2, 1.2]
 
     if figsize is None:
-        figsize = (8.5, n_param_rows * 2.2 + 5.0)
+        figsize = (9, n_param_rows * 2.4 + 5.0)
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(n_total_rows, col_wrap,
@@ -2126,15 +2194,36 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     row_axes = {r: [] for r in range(n_param_rows)}
     first_ax = None
 
+    # Build param-to-group-reference mapping for share_groups
+    group_ref_ax = {}  # group index -> first axis in group
+    param_group = {}   # param -> group index
+    if share_groups is not None:
+        for gi, group in enumerate(share_groups):
+            for p in group:
+                param_group[p] = gi
+
+    row_first_ax = {}  # for row-wise sharing (share_param_axes)
+
     for param in params:
         row, col = param_positions[param]
-        if first_ax is None:
-            ax = fig.add_subplot(gs[row, col])
-            first_ax = ax
-        elif share_param_axes:
-            ax = fig.add_subplot(gs[row, col], sharex=first_ax, sharey=first_ax)
+        share_ax = None
+        if share_groups is not None and param in param_group:
+            gi = param_group[param]
+            if gi in group_ref_ax:
+                share_ax = group_ref_ax[gi]
+        elif share_param_axes and row in row_first_ax:
+            share_ax = row_first_ax[row]
+
+        if share_ax is not None:
+            ax = fig.add_subplot(gs[row, col], sharex=share_ax, sharey=share_ax)
         else:
             ax = fig.add_subplot(gs[row, col])
+            if share_groups is not None and param in param_group:
+                group_ref_ax[param_group[param]] = ax
+            elif share_param_axes:
+                row_first_ax[row] = ax
+        if first_ax is None:
+            first_ax = ax
         axes_dict[param] = ax
         row_axes[row].append(ax)
 
@@ -2147,16 +2236,281 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
             null_errors_df[param].values,
             actual_errors[param].values[0], text_loc=text_loc,
             color='gray', bins=bins, logscale=logscale,
+            title=param_label_map[param], xlabel='',
+            show_label=False, text_fontsize=rc['font.size']
+        )
+        # Remove individual ylabel (shared label added via fig.text later)
+        axes_dict[param].set_ylabel('')
+
+    if share_param_axes:
+        for rax in row_first_ax.values():
+            rax.set_ylim(0.0, 0.09)
+            rax.set_xlim(left=1e-6)
+    if share_groups is not None:
+        for ref_ax in group_ref_ax.values():
+            ref_ax.set_xlim(left=1e-6)
+
+    # Add legend to the [0,2] param panel (right side, outside)
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_ax_param = None
+    for param in params:
+        r, c = param_positions[param]
+        if r == 0 and c == 2:
+            legend_ax_param = axes_dict[param]
+            break
+    if legend_ax_param is None:
+        legend_ax_param = axes_dict[params[-1]]
+    legend_handles = [
+        Patch(facecolor='gray', alpha=0.7, label='Null distribution'),
+        Line2D([0], [0], color='red', linestyle='--', linewidth=1.5, label='NSD V1'),
+    ]
+    legend_ax_param.legend(handles=legend_handles, fontsize=rc['font.size'] - 1,
+                           bbox_to_anchor=(1.05, 1), loc='upper left',
+                           frameon=False)
+
+    # Row n_param_rows: MSE (left) and Correlation (right) side by side
+    summary_row = n_param_rows
+    scatter_row = n_param_rows + 1
+
+    # MSE histogram at [summary_row, 0:2]
+    ax_mse = fig.add_subplot(gs[summary_row, 0:2])
+    _plot_histogram(
+        ax_mse,
+        np.asarray(null_mse_values),
+        actual_mse, text_loc=0.15,
+        color='black', bins=bins, logscale=logscale,
+        title='', xlabel='Mean squared error (MSE) of effect sizes',
+        text_fontsize=rc['font.size']
+    )
+    ax_mse.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
+    ax_mse.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
+    axes_dict['mse'] = ax_mse
+    ax_mse.set_xlabel(ax_mse.get_xlabel(), fontsize=rc['font.size'])
+
+    # Correlation histogram at [summary_row, 2:4]
+    if has_corr:
+        ax_corr = fig.add_subplot(gs[summary_row, 2:col_wrap])
+        _plot_histogram(
+            ax_corr,
+            np.asarray(null_corr_values),
+            actual_corr, text_loc=0.91,
+            color='black', bins=bins, logscale=False,
+            title='', xlabel=r'Correlation ($\mathit{r}$) of effect sizes',
+            text_fontsize=rc['font.size']
+        )
+        ax_corr.text(0.91, 0.85, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
+                     transform=ax_corr.transAxes, fontsize=rc['font.size'],
+                     verticalalignment='top',
+                     horizontalalignment='right', color='red')
+        ax_corr.set(xticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        ax_corr.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
+        ax_corr.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
+        axes_dict['corr'] = ax_corr
+        ax_corr.set_xlabel(ax_corr.get_xlabel(), fontsize=rc['font.size'])
+
+    # Observed scatter at [scatter_row, 0:2]
+    _scatter_params = scatter_params if scatter_params is not None else params
+    scatter_xlim = (-2, 8.2)
+    scatter_ticks = [-2, 0, 2, 4, 6, 8]
+    if has_scatter:
+        ax_scatter_obs = fig.add_subplot(gs[scatter_row, 0:2])
+        _plot_scatter(ax_scatter_obs, brod_std_means, nsd_std_means, _scatter_params,
+                      color_by_param=color_by_param, show_legend=color_by_param,
+                      xlabel='Broderick et al. V1', ylabel='NSD V1',
+                      xlim=scatter_xlim, xticks=scatter_ticks,
+                      x_err=obs_x_err, y_err=obs_y_err)
+        axes_dict['scatter_obs'] = ax_scatter_obs
+        ax_scatter_obs.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
+        ax_scatter_obs.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
+        if actual_corr is not None:
+            ax_scatter_obs.text(0.05, 0.95, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
+                                transform=ax_scatter_obs.transAxes, fontsize=rc['font.size'],
+                                verticalalignment='top', horizontalalignment='left')
+    ax_scatter_obs.set_aspect('equal', adjustable='box')
+
+    # Permuted scatter at [scatter_row, 2:4]
+    if null_std_means_example is not None and brod_std_means is not None:
+        ax_scatter_perm = fig.add_subplot(gs[scatter_row:scatter_row+1, 2:col_wrap])
+        _plot_scatter(ax_scatter_perm, brod_std_means, null_std_means_example,
+                      _scatter_params, color_by_param=color_by_param,
+                      xlabel='Broderick et al. V1', ylabel='Permuted NSD V1',
+                      xlim=scatter_xlim, xticks=scatter_ticks,
+                      x_err=perm_x_err, y_err=perm_y_err)
+        axes_dict['scatter_perm'] = ax_scatter_perm
+        ax_scatter_perm.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
+        ax_scatter_perm.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
+        if null_corr_example is not None:
+            ax_scatter_perm.text(0.05, 0.95, rf'$\mathit{{r}}$ = {null_corr_example:.2f}',
+                                 transform=ax_scatter_perm.transAxes, fontsize=rc['font.size'],
+                                 verticalalignment='top', horizontalalignment='left')
+
+    plt.tight_layout()
+
+    # Shared x/y axis labels for the per-parameter panels (using fig.text)
+    # Get bounding box of all param axes to center the labels
+    all_param_bboxes = [axes_dict[p].get_position() for p in params]
+    param_x0 = min(b.x0 for b in all_param_bboxes)
+    param_x1 = max(b.x1 for b in all_param_bboxes)
+    param_y0 = min(b.y0 for b in all_param_bboxes)
+    param_y1 = max(b.y1 for b in all_param_bboxes)
+    fig.text((param_x0 + param_x1) / 2, param_y0 - 0.03, xlabel_params,
+             ha='center', va='top', fontsize=rc['font.size'], transform=fig.transFigure)
+    fig.text(param_x0 - 0.04, (param_y0 + param_y1) / 2, 'Probability',
+             ha='center', va='center', rotation=90, fontsize=rc['font.size'],
+             transform=fig.transFigure)
+
+    # Place titles using fig.text after tight_layout for correct positioning
+    if has_scatter:
+        obs_bbox = axes_dict['scatter_obs'].get_position()
+        scatter_title_y = obs_bbox.y1 + 0.02
+        scatter_x0 = obs_bbox.x0
+        scatter_x1 = obs_bbox.x1
+        if 'scatter_perm' in axes_dict:
+            perm_bbox = axes_dict['scatter_perm'].get_position()
+            scatter_x1 = perm_bbox.x1
+        scatter_center_x = (scatter_x0 + scatter_x1) / 2
+        fig.text(scatter_center_x, scatter_title_y,
+                 'Correlations of parameter effect sizes',
+                 ha='center', fontweight='bold', fontsize=rc['font.size'],
+                 transform=fig.transFigure)
+
+    # Title above param rows
+    if title is not None:
+        first_param_bbox = first_ax.get_position()
+        fig.text(0.5, first_param_bbox.y1+0.05, title,
+                 ha='center', fontweight='bold', fontsize=rc['font.size'],
+                 transform=fig.transFigure)
+    fig.subplots_adjust(top=0.88)
+    utils.save_fig(save_path)
+
+    return fig, axes_dict
+
+
+def plot_combined_null_distributions_v2(null_errors_df, actual_errors,
+                                        null_mse_values, actual_mse,
+                                        null_corr_values=None, actual_corr=None,
+                                        nsd_std_means=None, brod_std_means=None,
+                                        null_std_means_example=None, null_corr_example=None,
+                                        params=None, bins=50,
+                                        logscale=True, title=None, figsize=None,
+                                        xlabel_params='Standardized Squared Error',
+                                        color_by_param=False, save_path=None,
+                                        scatter_params=None, share_param_axes=True,
+                                        param_positions=None,
+                                        share_groups=None):
+    """Plot combined null distributions using a 6-column gridspec (3 params per row).
+
+    Same as plot_combined_null_distributions but uses a 6-column grid so that
+    3 param histograms per row (each spanning 2 columns) align cleanly with
+    summary rows that split 3:3.
+
+    Parameters
+    ----------
+    param_positions : dict, optional
+        {param_name: (row, col_index)} where col_index is 0, 1, or 2.
+    """
+    if params is None:
+        params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+
+    n_params = len(params)
+    has_corr = (null_corr_values is not None and actual_corr is not None)
+    has_scatter = (nsd_std_means is not None and brod_std_means is not None)
+
+    # Resolve param positions (col_index 0..2 maps to gs columns 0:2, 2:4, 4:6)
+    n_cols = 3
+    if param_positions is None:
+        param_positions = {}
+        for i, param in enumerate(params):
+            param_positions[param] = (i // n_cols, i % n_cols)
+    n_param_rows = max(r for r, c in param_positions.values()) + 1
+
+    # Style
+    rc.update({'font.size': 8, 'axes.titlesize': 8, 'axes.labelpad': 2,
+               'axes.linewidth': 0.8, 'xtick.major.width': 0.8,
+               'ytick.major.width': 0.8, 'axes.labelsize': 8,
+               'xtick.labelsize': 6, 'ytick.labelsize': 6,
+               'xtick.major.pad': 2, 'ytick.major.pad': 2})
+    sns.set_theme("paper", style='ticks', rc=rc)
+
+    # Grid: 6 columns, param rows + summary row + scatter row
+    gs_cols = 6
+    n_total_rows = n_param_rows + 2
+    height_ratios = [1] * n_param_rows + [1.2, 1.2]
+
+    if figsize is None:
+        figsize = (8.5, n_param_rows * 2.2 + 5.0)
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(n_total_rows, gs_cols,
+                          height_ratios=height_ratios,
+                          hspace=0.8, wspace=0.3)
+
+    param_label_map = dict(zip(params, _change_params_to_math_symbols(params)))
+
+    axes_dict = {}
+    row_axes = {r: [] for r in range(n_param_rows)}
+    first_ax = None
+
+    # Build param-to-group-reference mapping for share_groups
+    group_ref_ax = {}
+    param_group = {}
+    if share_groups is not None:
+        for gi, group in enumerate(share_groups):
+            for p in group:
+                param_group[p] = gi
+
+    row_first_ax = {}
+
+    for param in params:
+        row, col_idx = param_positions[param]
+        gs_col_start = col_idx * 2
+        gs_col_end = gs_col_start + 2
+
+        share_ax = None
+        if share_groups is not None and param in param_group:
+            gi = param_group[param]
+            if gi in group_ref_ax:
+                share_ax = group_ref_ax[gi]
+        elif share_param_axes and row in row_first_ax:
+            share_ax = row_first_ax[row]
+
+        if share_ax is not None:
+            ax = fig.add_subplot(gs[row, gs_col_start:gs_col_end],
+                                 sharex=share_ax, sharey=share_ax)
+        else:
+            ax = fig.add_subplot(gs[row, gs_col_start:gs_col_end])
+            if share_groups is not None and param in param_group:
+                group_ref_ax[param_group[param]] = ax
+            elif share_param_axes:
+                row_first_ax[row] = ax
+        if first_ax is None:
+            first_ax = ax
+        axes_dict[param] = ax
+        row_axes[row].append(ax)
+
+    # Plot per-parameter histograms
+    text_loc_overrides = {'slope': .3, 'A_1': .3, 'A_2': .3, 'p_3': .3}
+    for param in params:
+        text_loc = text_loc_overrides.get(param, .25)
+        _plot_histogram(
+            axes_dict[param],
+            null_errors_df[param].values,
+            actual_errors[param].values[0], text_loc=text_loc,
+            color='gray', bins=bins, logscale=logscale,
             title=param_label_map[param], xlabel=xlabel_params,
             show_label=False, text_fontsize=8
         )
 
     if share_param_axes:
-        first_ax.set_ylim(0.0, 0.09)
-        first_ax.set_xlim(left=1e-6)
+        for rax in row_first_ax.values():
+            rax.set_ylim(0.0, 0.09)
+            rax.set_xlim(left=1e-6)
+    if share_groups is not None:
+        for ref_ax in group_ref_ax.values():
+            ref_ax.set_xlim(left=1e-6)
 
     # Clean up xlabel/ylabel on param axes
-    # Find bottom-most occupied row per column for xlabel placement
     col_max_row = {}
     for r, c in param_positions.values():
         col_max_row[c] = max(col_max_row.get(c, -1), r)
@@ -2168,12 +2522,11 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         if col > 0:
             ax.set_ylabel('')
 
-    # Row n_param_rows: MSE (left) and Correlation (right) side by side
+    # Summary row: MSE (left 3 cols) and Correlation (right 3 cols)
     summary_row = n_param_rows
     scatter_row = n_param_rows + 1
 
-    # MSE histogram at [summary_row, 0:2]
-    ax_mse = fig.add_subplot(gs[summary_row, 0:2])
+    ax_mse = fig.add_subplot(gs[summary_row, 0:3])
     _plot_histogram(
         ax_mse,
         np.asarray(null_mse_values),
@@ -2187,16 +2540,15 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     axes_dict['mse'] = ax_mse
     ax_mse.set_xlabel(ax_mse.get_xlabel(), fontsize=8)
 
-    # Correlation histogram at [summary_row, 2:4]
     if has_corr:
-        ax_corr = fig.add_subplot(gs[summary_row, 2:col_wrap])
+        ax_corr = fig.add_subplot(gs[summary_row, 3:6])
         _plot_histogram(
             ax_corr,
             np.asarray(null_corr_values),
             actual_corr, text_loc=0.91,
             color='black', bins=bins, logscale=False,
             title='', xlabel=r'Correlation ($\mathit{r}$)',
-            higher_is_better=True, text_fontsize=8
+            text_fontsize=8
         )
         ax_corr.text(0.91, 0.85, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
                      transform=ax_corr.transAxes, fontsize=8,
@@ -2208,46 +2560,41 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         axes_dict['corr'] = ax_corr
         ax_corr.set_xlabel(ax_corr.get_xlabel(), fontsize=8)
 
-    # Observed scatter at [scatter_row, 0:2]
+    # Scatter row: Observed (left) and Permuted (right)
     _scatter_params = scatter_params if scatter_params is not None else params
+    scatter_xlim = (-2, 8.2)
+    scatter_ticks = [-2, 0, 2, 4, 6, 8]
     if has_scatter:
-        ax_scatter_obs = fig.add_subplot(gs[scatter_row, 0:2])
+        ax_scatter_obs = fig.add_subplot(gs[scatter_row, 0:3])
         _plot_scatter(ax_scatter_obs, brod_std_means, nsd_std_means, _scatter_params,
                       color_by_param=color_by_param,
-                      xlabel='Broderick et al. V1', ylabel='NSD V1')
+                      xlabel='Broderick et al. V1', ylabel='NSD V1',
+                      xlim=scatter_xlim, xticks=scatter_ticks)
         axes_dict['scatter_obs'] = ax_scatter_obs
         if actual_corr is not None:
             ax_scatter_obs.text(0.05, 0.95, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
                                 transform=ax_scatter_obs.transAxes, fontsize=8,
                                 verticalalignment='top', horizontalalignment='left')
-    ax_scatter_obs.set(xticks=[-2,0, 2], yticks=[-2, 0, 2])
     ax_scatter_obs.set_aspect('equal', adjustable='box')
-    ax_scatter_obs.set_xlim(-2, 3)
-    ax_scatter_obs.set_ylim(-2, 3)
 
-    # Permuted scatter at [scatter_row, 2:4]
     if null_std_means_example is not None and brod_std_means is not None:
-        ax_scatter_perm = fig.add_subplot(gs[scatter_row:scatter_row+1, 2:col_wrap])
+        ax_scatter_perm = fig.add_subplot(gs[scatter_row, 3:6])
         _plot_scatter(ax_scatter_perm, brod_std_means, null_std_means_example,
                       _scatter_params, color_by_param=color_by_param,
-                      xlabel='Broderick et al. V1', ylabel='Permuted NSD V1')
+                      xlabel='Broderick et al. V1', ylabel='Permuted NSD V1',
+                      xlim=scatter_xlim, xticks=scatter_ticks)
         axes_dict['scatter_perm'] = ax_scatter_perm
         if null_corr_example is not None:
             ax_scatter_perm.text(0.05, 0.95, rf'$\mathit{{r}}$ = {null_corr_example:.2f}',
                                  transform=ax_scatter_perm.transAxes, fontsize=8,
                                  verticalalignment='top', horizontalalignment='left')
-        ax_scatter_perm.set_xlim(-2, 5.5)
-        ax_scatter_perm.set_ylim(-2, 5.5)
-        ax_scatter_perm.set(xticks=[-2,0,2,4], yticks=[-2, 0, 2, 4])
-
 
     plt.tight_layout()
 
-    # Place titles using fig.text after tight_layout for correct positioning
+    # Place titles
     mse_bbox = axes_dict['mse'].get_position()
     summary_title_y = mse_bbox.y1 + 0.02
-    summary_center_x = 0.5
-    fig.text(summary_center_x, summary_title_y,
+    fig.text(0.5, summary_title_y,
              'Summary statistics across parameters',
              ha='center', fontweight='bold', fontsize=9,
              transform=fig.transFigure)
@@ -2268,7 +2615,6 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                  ha='center', fontweight='bold', fontsize=9,
                  transform=fig.transFigure)
 
-    # Title above param rows
     if title is not None:
         first_param_bbox = first_ax.get_position()
         fig.text(0.5, first_param_bbox.y1+0.05, title,

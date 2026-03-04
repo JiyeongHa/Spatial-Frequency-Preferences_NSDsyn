@@ -578,6 +578,9 @@ rule plot_null_param_distributions:
         nsd_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "nsdsyn",
                             'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
                             subj=make_subj_list('nsdsyn')),
+        broderick_models = expand(os.path.join(config['OUTPUT_DIR'], "sfp_model", "results_2D", "broderick",
+                            'model-params_lr-{{lr}}_eph-{{max_epoch}}_sub-{subj}_roi-V1_vs-{{vs}}.pt'),
+                            subj=make_subj_list('broderick')),
         null_ecc_models = lambda wc: [
             perm_model_pt('nsdsyn', subj, p, wc.lr, wc.max_epoch, 'V1', wc.vs, shuffle_type='eccentricity')
             for p in range(int(wc.n_perm))
@@ -600,7 +603,9 @@ rule plot_null_param_distributions:
         from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
 
         nsd_df = model.load_all_models(input.nsd_models, *ARGS_2D)
+        broderick_df = model.load_all_models(input.broderick_models, *ARGS_2D)
         actual_means = nsd_df[PARAMS_2D].mean().to_dict()
+        broderick_means = broderick_df[PARAMS_2D].mean().to_dict()
 
         # Load each shuffle type, keeping only relevant params
         meta_cols = ['sub', 'perm']
@@ -628,22 +633,28 @@ rule plot_null_param_distributions:
         null_param_df['1/sigma'] = 1.0 / null_param_df['sigma']
         null_param_df.drop(columns=['sigma'], inplace=True)
         actual_means['1/sigma'] = 1.0 / actual_means.pop('sigma')
+        broderick_means['1/sigma'] = 1.0 / broderick_means.pop('sigma')
 
         params_plot = ['1/sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+        share_groups = [['p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']]
 
         fig, _ = vis2D.plot_null_param_value_distributions(
             null_param_df, actual_means,
+            broderick_param_values=broderick_means,
             params=params_plot,
-            title=f'Null Model Parameter Distributions (N perm. = {wildcards.n_perm})',
-            bins=100, plot_median=True, include_zero=True,
+            title='Parameter estimates from null model and Broderick et al.',
+            bins=100, include_zero=True,
+            share_groups=share_groups,
             save_path=output.plot1)
         plt.close()
 
         fig, _ = vis2D.plot_null_param_value_distributions(
             null_param_df, actual_means,
+            broderick_param_values=broderick_means,
             params=params_plot,
-            title=f'Null Model Parameter Distributions (N perm. = {wildcards.n_perm})',
-            bins=100, plot_median=True, include_zero=True,
+            title='Parameter estimates from null model and Broderick et al.',
+            bins=100, include_zero=True,
+            share_groups=share_groups,
             save_path=output.plot2)
         plt.close()
  
@@ -685,7 +696,8 @@ rule plot_combined_error_mse_comparison:
         import matplotlib.pyplot as plt
         from sfp_nsdsyn.bootstrapping import (calculate_standardized_error_per_param_comparison,
                                               calculate_standardized_metric_comparison,
-                                              standardized_mean, pooled_std)
+                                              standardized_mean, pooled_std,
+                                              bootstrap_standardized_ci)
         from sfp_nsdsyn.visualization import plot_2D_model_results as vis2D
 
         # Load actual datasets
@@ -711,20 +723,26 @@ rule plot_combined_error_mse_comparison:
         # Merge into combined null df on (sub, perm)
         null_nsd_df = null_ecc_df.merge(null_ori_df, on=meta_cols).merge(null_sf_df, on=meta_cols)
 
+        # Transform sigma -> 1/sigma in all DataFrames
+        for df in [nsd_df, broderick_df, null_nsd_df]:
+            df['1/sigma'] = 1.0 / df['sigma']
+            df.drop(columns=['sigma'], inplace=True)
+
         # --- Per-parameter errors ---
         standardize_flag = wildcards.standardize == 'True'
-        params_all_ordered = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+        PARAMS_2D_INV = ['1/sigma', 'slope', 'intercept', 'p_1', 'p_2', 'p_3', 'p_4', 'A_1', 'A_2']
+        params_all_ordered = ['1/sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
         actual_errors, null_errors_df, _ = calculate_standardized_error_per_param_comparison(
             nsd_df, broderick_df, null_nsd_df, params=params_all_ordered, standardize=standardize_flag)
 
         # --- MSE/correlation (standardized, all params) ---
         (actual_mse, actual_corr), null_result_list = calculate_standardized_metric_comparison(
-            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D, metric='both', standardize=True)
+            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D_INV, metric='both', standardize=True)
         null_mse_values = [d['mse'] for d in null_result_list]
         null_corr_values = [d['corr'] for d in null_result_list]
 
         # --- Scatter plots (standardized, all params) ---
-        params_scatter = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
+        params_scatter = ['1/sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
         _nsd = nsd_df.copy()
         _brod = broderick_df.copy()
         _nsd['dset_type'] = 'NSD V1'
@@ -744,46 +762,55 @@ rule plot_combined_error_mse_comparison:
         null_std_means_perm = standardized_mean(_null_perm, pooled_sd_df, group_col='dset_type', params=params_scatter)
         null_std_means_example = null_std_means_perm[params_scatter].values.squeeze()
 
-        # Layout: sigma[0,0], slope[0,2], intercept[0,3], p_1-A_1 row 1, A_2-p_4 row 2
+        # Bootstrap 68% CI for scatter error bars
+        boot_ci = bootstrap_standardized_ci(combined, pooled_sd_df, group_col='dset_type',
+                                            params=params_scatter, n_boot=1000, ci=68)
+        nsd_ci = boot_ci['NSD V1']
+        brod_ci = boot_ci['Broderick et al. V1']
+        obs_y_err = np.array([nsd_std_means - nsd_ci['ci_lo'],
+                              nsd_ci['ci_hi'] - nsd_std_means])
+        obs_x_err = np.array([brod_std_means - brod_ci['ci_lo'],
+                              brod_ci['ci_hi'] - brod_std_means])
+        # Bootstrap CI for null permutation scatter
+        _null_perm_combined = pd.concat([_null_perm, _brod], axis=0)
+        null_boot_ci = bootstrap_standardized_ci(_null_perm_combined, pooled_sd_df,
+                                                  group_col='dset_type',
+                                                  params=params_scatter, n_boot=1000, ci=68)
+        null_ci = null_boot_ci['Null NSD V1']
+        perm_y_err = np.array([null_std_means_example - null_ci['ci_lo'],
+                               null_ci['ci_hi'] - null_std_means_example])
+        # x error bars for perm scatter are same as observed (Broderick)
+        perm_x_err = obs_x_err
+
+        # Layout: 1/sigma[0,0], slope[0,1], intercept[0,2], p_1-A_1 row 1, A_2-p_4 row 2
         param_pos = {
-            'sigma': (0, 0), 'slope': (0, 2), 'intercept': (0, 3),
+            '1/sigma': (0, 0), 'slope': (0, 1), 'intercept': (0, 2),
             'p_1': (1, 0), 'p_2': (1, 1), 'A_1': (1, 2),
             'A_2': (2, 0), 'p_3': (2, 1), 'p_4': (2, 2),
         }
-        xlabel_label = 'Standardized Squared Error' if standardize_flag else 'Squared Error'
+        xlabel_label = 'Squared Error with Broderick et al.'
 
         # Create combined plot
-        fig, _ = vis2D.plot_combined_null_distributions(
-            null_errors_df, actual_errors,
-            null_mse_values, actual_mse,
-            null_corr_values=null_corr_values, actual_corr=actual_corr,
-            nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
-            null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
-            params=params_all_ordered,
-            scatter_params=params_scatter,
-            share_param_axes=False,
-            xlabel_params=xlabel_label,
-            title=f'Per-parameter error between null NSD V1 vs. Broderick et al. V1 (N perm. = {wildcards.n_perm})',
-            bins=100,
-            param_positions=param_pos,
-            save_path=output.plot1)
-        plt.close()
+        for save_path in [output.plot1, output.plot2]:
+            fig, _ = vis2D.plot_combined_null_distributions(
+                null_errors_df, actual_errors,
+                null_mse_values, actual_mse,
+                null_corr_values=null_corr_values, actual_corr=actual_corr,
+                nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
+                null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
+                params=params_all_ordered,
+                scatter_params=params_scatter,
+                share_param_axes=False,
+                xlabel_params=xlabel_label,
+                title=f'Deviation between NSD V1 vs. Broderick et al. V1',
+                bins=100,
+                param_positions=param_pos,
+                color_by_param=True,
+                obs_x_err=obs_x_err, obs_y_err=obs_y_err,
+                perm_x_err=perm_x_err, perm_y_err=perm_y_err,
+                save_path=save_path)
+            plt.close()
 
-        fig, _ = vis2D.plot_combined_null_distributions(
-            null_errors_df, actual_errors,
-            null_mse_values, actual_mse,
-            null_corr_values=null_corr_values, actual_corr=actual_corr,
-            nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
-            null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
-            params=params_all_ordered,
-            scatter_params=params_scatter,
-            share_param_axes=False,
-            xlabel_params=xlabel_label,
-            title=f'Per-parameter error between null NSD V1 vs. Broderick et al. V1 (N perm. = {wildcards.n_perm})',
-            bins=100,
-            param_positions=param_pos,
-            save_path=output.plot2)
-        plt.close()
 
 rule run_model:
     input:

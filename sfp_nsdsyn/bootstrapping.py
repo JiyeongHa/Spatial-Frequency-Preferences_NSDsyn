@@ -236,6 +236,50 @@ def standardized_mean(df, pooled_sd_df, group_col, params=None):
     return standardized.reset_index()
 
 
+def bootstrap_standardized_ci(df, pooled_sd_df, group_col, params, n_boot=1000, ci=68, seed=42):
+    """Bootstrap confidence intervals for standardized means across subjects.
+
+    For each group in df, computes per-subject values divided by pooled SD,
+    then bootstrap resamples subjects to get CI of the mean.
+
+    Args:
+        df: DataFrame with columns for params, group_col, and 'sub'
+        pooled_sd_df: DataFrame with pooled SD per param (from pooled_std)
+        group_col: Column identifying groups (e.g., 'dset_type')
+        params: List of parameter names
+        n_boot: Number of bootstrap iterations
+        ci: Confidence interval percentage (e.g., 68 for 68% CI)
+        seed: Random seed
+
+    Returns:
+        dict: {group_name: {'mean': array, 'ci_lo': array, 'ci_hi': array}}
+            Each array has shape (n_params,) matching the order of params.
+    """
+    rng = np.random.RandomState(seed)
+    pooled_sd = pooled_sd_df.iloc[0][params].values
+    lo_pct = (100 - ci) / 2
+    hi_pct = 100 - lo_pct
+
+    results = {}
+    for group_name, group_df in df.groupby(group_col):
+        # Per-subject standardized values: shape (n_subjects, n_params)
+        subject_vals = group_df[params].values / pooled_sd
+        n_subjects = len(subject_vals)
+
+        # Bootstrap resample subjects
+        boot_means = np.empty((n_boot, len(params)))
+        for b in range(n_boot):
+            idx = rng.randint(0, n_subjects, size=n_subjects)
+            boot_means[b] = subject_vals[idx].mean(axis=0)
+
+        results[group_name] = {
+            'mean': subject_vals.mean(axis=0),
+            'ci_lo': np.percentile(boot_means, lo_pct, axis=0),
+            'ci_hi': np.percentile(boot_means, hi_pct, axis=0),
+        }
+    return results
+
+
 def shuffle_class_idx(df, to_shuffle=['betas'],
                       groupby_cols=['voxel', 'sub'], same_perm=False):
     """Shuffle values across class_idx within each group (e.g., voxel).
