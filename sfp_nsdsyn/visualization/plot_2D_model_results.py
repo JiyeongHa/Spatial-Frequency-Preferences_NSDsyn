@@ -2082,25 +2082,22 @@ def _plot_scatter(ax, x_vals, y_vals, params, color_by_param=False,
 
 def plot_combined_null_distributions(null_errors_df, actual_errors,
                                      null_mse_values, actual_mse,
-                                     null_corr_values=None, actual_corr=None,
                                      nsd_std_means=None, brod_std_means=None,
-                                     null_std_means_example=None, null_corr_example=None,
-                                     params=None, col_wrap=4, bins=50,
+                                     params=None, col_wrap=3, bins=50,
                                      logscale=True, title=None, figsize=None,
                                      xlabel_params='Standardized Squared Error',
                                      color_by_param=False, save_path=None,
                                      scatter_params=None, share_param_axes=True,
                                      param_positions=None,
                                      share_groups=None,
-                                     obs_x_err=None, obs_y_err=None,
-                                     perm_x_err=None, perm_y_err=None):
+                                     obs_x_err=None, obs_y_err=None):
     """
-    Plot combined per-parameter error histograms, MSE, correlation, and scatter.
+    Plot combined per-parameter error histograms, MSE, and observed scatter.
 
     Layout:
         Rows 0..N-1: parameter histograms (col_wrap columns)
-        Row N, cols 0:2: MSE histogram; cols 2:4: Correlation histogram
-        Row N+1, cols 0:2: Observed scatter; cols 2:4: Permuted scatter
+        Row N, col 0:   MSE histogram
+        Row N, col 1:3: Observed scatter (NSD vs Broderick)
 
     Parameters
     ----------
@@ -2112,16 +2109,8 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         Null distribution MSE values.
     actual_mse : float
         Observed MSE value.
-    null_corr_values : array-like, optional
-        Null distribution correlation values.
-    actual_corr : float, optional
-        Observed correlation value.
     nsd_std_means, brod_std_means : array-like, optional
         Standardized parameter means for observed scatter plot.
-    null_std_means_example : array-like, optional
-        Example null permutation standardized means for permuted scatter.
-    null_corr_example : float, optional
-        Example null permutation correlation.
     params : list of str, optional
         Parameters to plot in order.
     col_wrap : int
@@ -2158,7 +2147,6 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         params = ['sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
 
     n_params = len(params)
-    has_corr = (null_corr_values is not None and actual_corr is not None)
     has_scatter = (nsd_std_means is not None and brod_std_means is not None)
 
     # Resolve param positions
@@ -2176,12 +2164,12 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                'xtick.major.pad': 2, 'ytick.major.pad': 2})
     sns.set_theme("paper", style='ticks', rc=rc)
 
-    # Grid: param rows + summary row (MSE | Corr) + scatter row (Observed | Permuted)
-    n_total_rows = n_param_rows + 2
-    height_ratios = [1] * n_param_rows + [1.2, 1.2]
+    # Grid: param rows + summary row (MSE | Scatter)
+    n_total_rows = n_param_rows + 1
+    height_ratios = [1] * n_param_rows + [1.2]
 
     if figsize is None:
-        figsize = (9, n_param_rows * 2.4 + 5.0)
+        figsize = (9, n_param_rows * 2.4 + 2.5)
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(n_total_rows, col_wrap,
@@ -2269,9 +2257,8 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
                            bbox_to_anchor=(1.05, 1), loc='upper left',
                            frameon=False)
 
-    # Row n_param_rows: MSE (left) and Correlation (right) side by side
+    # Row n_param_rows: MSE (left, 1 col) and Scatter (right, 2 cols)
     summary_row = n_param_rows
-    scatter_row = n_param_rows + 1
 
     # MSE histogram at [summary_row, 0:2]
     ax_mse = fig.add_subplot(gs[summary_row, 0:2])
@@ -2288,33 +2275,12 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     axes_dict['mse'] = ax_mse
     ax_mse.set_xlabel(ax_mse.get_xlabel(), fontsize=rc['font.size'])
 
-    # Correlation histogram at [summary_row, 2:4]
-    if has_corr:
-        ax_corr = fig.add_subplot(gs[summary_row, 2:col_wrap])
-        _plot_histogram(
-            ax_corr,
-            np.asarray(null_corr_values),
-            actual_corr, text_loc=0.91,
-            color='black', bins=bins, logscale=False,
-            title='', xlabel=r'Correlation ($\mathit{r}$) of effect sizes',
-            text_fontsize=rc['font.size']
-        )
-        ax_corr.text(0.91, 0.85, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
-                     transform=ax_corr.transAxes, fontsize=rc['font.size'],
-                     verticalalignment='top',
-                     horizontalalignment='right', color='red')
-        ax_corr.set(xticks=[0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        ax_corr.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
-        ax_corr.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], zorder=0)
-        axes_dict['corr'] = ax_corr
-        ax_corr.set_xlabel(ax_corr.get_xlabel(), fontsize=rc['font.size'])
-
-    # Observed scatter at [scatter_row, 0:2]
+    # Observed scatter at [summary_row, 2]
     _scatter_params = scatter_params if scatter_params is not None else params
     scatter_xlim = (-2, 8.2)
     scatter_ticks = [-2, 0, 2, 4, 6, 8]
     if has_scatter:
-        ax_scatter_obs = fig.add_subplot(gs[scatter_row, 0:2])
+        ax_scatter_obs = fig.add_subplot(gs[summary_row, 2])
         _plot_scatter(ax_scatter_obs, brod_std_means, nsd_std_means, _scatter_params,
                       color_by_param=color_by_param, show_legend=color_by_param,
                       xlabel='Broderick et al. V1', ylabel='NSD V1',
@@ -2323,27 +2289,7 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
         axes_dict['scatter_obs'] = ax_scatter_obs
         ax_scatter_obs.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
         ax_scatter_obs.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
-        if actual_corr is not None:
-            ax_scatter_obs.text(0.05, 0.95, rf'$\mathit{{r}}$ = {actual_corr:.2f}',
-                                transform=ax_scatter_obs.transAxes, fontsize=rc['font.size'],
-                                verticalalignment='top', horizontalalignment='left')
-    ax_scatter_obs.set_aspect('equal', adjustable='box')
-
-    # Permuted scatter at [scatter_row, 2:4]
-    if null_std_means_example is not None and brod_std_means is not None:
-        ax_scatter_perm = fig.add_subplot(gs[scatter_row:scatter_row+1, 2:col_wrap])
-        _plot_scatter(ax_scatter_perm, brod_std_means, null_std_means_example,
-                      _scatter_params, color_by_param=color_by_param,
-                      xlabel='Broderick et al. V1', ylabel='Permuted NSD V1',
-                      xlim=scatter_xlim, xticks=scatter_ticks,
-                      x_err=perm_x_err, y_err=perm_y_err)
-        axes_dict['scatter_perm'] = ax_scatter_perm
-        ax_scatter_perm.axhline(y=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
-        ax_scatter_perm.axvline(x=0, color='gray', linestyle=':', linewidth=rc['axes.linewidth'], alpha=0.8, zorder=0)
-        if null_corr_example is not None:
-            ax_scatter_perm.text(0.05, 0.95, rf'$\mathit{{r}}$ = {null_corr_example:.2f}',
-                                 transform=ax_scatter_perm.transAxes, fontsize=rc['font.size'],
-                                 verticalalignment='top', horizontalalignment='left')
+        ax_scatter_obs.set_aspect('equal', adjustable='box')
 
     plt.tight_layout()
 
@@ -2363,15 +2309,9 @@ def plot_combined_null_distributions(null_errors_df, actual_errors,
     # Place titles using fig.text after tight_layout for correct positioning
     if has_scatter:
         obs_bbox = axes_dict['scatter_obs'].get_position()
-        scatter_title_y = obs_bbox.y1 + 0.02
-        scatter_x0 = obs_bbox.x0
-        scatter_x1 = obs_bbox.x1
-        if 'scatter_perm' in axes_dict:
-            perm_bbox = axes_dict['scatter_perm'].get_position()
-            scatter_x1 = perm_bbox.x1
-        scatter_center_x = (scatter_x0 + scatter_x1) / 2
-        fig.text(scatter_center_x, scatter_title_y,
-                 'Correlations of parameter effect sizes',
+        scatter_center_x = (obs_bbox.x0 + obs_bbox.x1) / 2
+        fig.text(scatter_center_x, obs_bbox.y1 + 0.02,
+                 'Standardized parameter means',
                  ha='center', fontweight='bold', fontsize=rc['font.size'],
                  transform=fig.transFigure)
 

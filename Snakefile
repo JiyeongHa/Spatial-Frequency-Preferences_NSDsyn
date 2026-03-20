@@ -689,9 +689,9 @@ rule plot_combined_error_mse_comparison:
             for subj in make_subj_list('nsdsyn')]
     output:
         plot1 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
-                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_pidx-{perm_idx}_std-{standardize}.png'),
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_std-{standardize}.png'),
         plot2 = os.path.join(config['OUTPUT_DIR'], 'figures', 'sfp_model', 'results_2D', 'perm',
-                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_pidx-{perm_idx}_std-{standardize}.svg')
+                           'combined_error_mse_nsd-broderick_nperm-{n_perm}_lr-{lr}_eph-{max_epoch}_vs-{vs}_std-{standardize}.svg')
     run:
         import matplotlib.pyplot as plt
         from sfp_nsdsyn.bootstrapping import (calculate_standardized_error_per_param_comparison,
@@ -735,11 +735,10 @@ rule plot_combined_error_mse_comparison:
         actual_errors, null_errors_df, _ = calculate_standardized_error_per_param_comparison(
             nsd_df, broderick_df, null_nsd_df, params=params_all_ordered, standardize=standardize_flag)
 
-        # --- MSE/correlation (standardized, all params) ---
-        (actual_mse, actual_corr), null_result_list = calculate_standardized_metric_comparison(
-            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D_INV, metric='both', standardize=True)
+        # --- MSE (standardized, all params) ---
+        actual_mse, null_result_list = calculate_standardized_metric_comparison(
+            nsd_df, broderick_df, null_nsd_df, params=PARAMS_2D_INV, metric='mse', standardize=True)
         null_mse_values = [d['mse'] for d in null_result_list]
-        null_corr_values = [d['corr'] for d in null_result_list]
 
         # --- Scatter plots (standardized, all params) ---
         params_scatter = ['1/sigma', 'slope', 'intercept', 'p_1', 'p_2', 'A_1', 'A_2', 'p_3', 'p_4']
@@ -753,15 +752,6 @@ rule plot_combined_error_mse_comparison:
         nsd_std_means = std_means[std_means['dset_type'] == 'NSD V1'][params_scatter].values.squeeze()
         brod_std_means = std_means[std_means['dset_type'] == 'Broderick et al. V1'][params_scatter].values.squeeze()
 
-        # Get example null permutation for scatter plot
-        perm_idx = int(wildcards.perm_idx)
-        null_corr_example = null_corr_values[perm_idx]
-        perm_id = null_result_list[perm_idx]['perm']
-        _null_perm = null_nsd_df[null_nsd_df['perm'] == perm_id].copy()
-        _null_perm['dset_type'] = 'Null NSD V1'
-        null_std_means_perm = standardized_mean(_null_perm, pooled_sd_df, group_col='dset_type', params=params_scatter)
-        null_std_means_example = null_std_means_perm[params_scatter].values.squeeze()
-
         # Bootstrap 68% CI for scatter error bars
         boot_ci = bootstrap_standardized_ci(combined, pooled_sd_df, group_col='dset_type',
                                             params=params_scatter, n_boot=1000, ci=68)
@@ -771,16 +761,6 @@ rule plot_combined_error_mse_comparison:
                               nsd_ci['ci_hi'] - nsd_std_means])
         obs_x_err = np.array([brod_std_means - brod_ci['ci_lo'],
                               brod_ci['ci_hi'] - brod_std_means])
-        # Bootstrap CI for null permutation scatter
-        _null_perm_combined = pd.concat([_null_perm, _brod], axis=0)
-        null_boot_ci = bootstrap_standardized_ci(_null_perm_combined, pooled_sd_df,
-                                                  group_col='dset_type',
-                                                  params=params_scatter, n_boot=1000, ci=68)
-        null_ci = null_boot_ci['Null NSD V1']
-        perm_y_err = np.array([null_std_means_example - null_ci['ci_lo'],
-                               null_ci['ci_hi'] - null_std_means_example])
-        # x error bars for perm scatter are same as observed (Broderick)
-        perm_x_err = obs_x_err
 
         # Layout: 1/sigma[0,0], slope[0,1], intercept[0,2], p_1-A_1 row 1, A_2-p_4 row 2
         param_pos = {
@@ -795,9 +775,7 @@ rule plot_combined_error_mse_comparison:
             fig, _ = vis2D.plot_combined_null_distributions(
                 null_errors_df, actual_errors,
                 null_mse_values, actual_mse,
-                null_corr_values=null_corr_values, actual_corr=actual_corr,
                 nsd_std_means=nsd_std_means, brod_std_means=brod_std_means,
-                null_std_means_example=null_std_means_example, null_corr_example=null_corr_example,
                 params=params_all_ordered,
                 scatter_params=params_scatter,
                 share_param_axes=False,
@@ -807,7 +785,6 @@ rule plot_combined_error_mse_comparison:
                 param_positions=param_pos,
                 color_by_param=True,
                 obs_x_err=obs_x_err, obs_y_err=obs_y_err,
-                perm_x_err=perm_x_err, perm_y_err=perm_y_err,
                 save_path=save_path)
             plt.close()
 
