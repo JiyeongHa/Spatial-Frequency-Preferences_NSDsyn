@@ -2,6 +2,27 @@ import sys
 from . import utils as utils
 import pandas as pd
 import numpy as np
+from scipy.stats import rankdata
+
+
+def _compute_corr(x, y, method='pearson', axis=0):
+    """Compute Pearson or Spearman correlation, supporting 1D and 2D arrays.
+
+    For 2D inputs, correlations are computed along the specified axis.
+    Spearman is computed as Pearson on rank-transformed data.
+    """
+    if method == 'pearson':
+        return utils.pearson_r(x, y, axis=axis)
+    elif method == 'spearman':
+        if x.ndim == 1:
+            return utils.pearson_r(rankdata(x), rankdata(y), axis=axis)
+        else:
+            # Rank along the same axis we compute correlation along
+            rx = np.apply_along_axis(rankdata, axis, x)
+            ry = np.apply_along_axis(rankdata, axis, np.asarray(y))
+            return utils.pearson_r(rx, ry, axis=axis)
+    else:
+        raise ValueError(f"corr_method must be 'pearson' or 'spearman', got '{method}'")
 
 
 def sample_run_and_average(df, class_idx=range(28), sample_size=8,
@@ -835,7 +856,8 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
                                               broderick_dset_type='Broderick et al. V1',
                                               null_dset_type='Null NSD V1',
                                               perm_col='perm', params=None,
-                                              metric='both', standardize=True):
+                                              metric='both', standardize=True,
+                                              corr_method='pearson'):
     """
     Calculate MSE and/or correlation between NSD and Broderick data.
 
@@ -911,14 +933,15 @@ def calculate_standardized_metric_comparison(nsd_df, broderick_df, null_nsd_df,
 
     # Calculate actual metrics
     actual_mse = np.mean((nsd_means - broderick_means) ** 2)
-    actual_corr = utils.pearson_r(nsd_means, broderick_means)
+    actual_corr = _compute_corr(nsd_means, broderick_means, method=corr_method)
 
     # Null metrics (vectorized)
     diff_squared = (null_means_array - broderick_means) ** 2
     null_mse_array = np.mean(diff_squared, axis=1)
 
     broderick_broadcasted = np.broadcast_to(broderick_means, null_means_array.shape)
-    null_corr_array = utils.pearson_r(null_means_array, broderick_broadcasted, axis=1)
+    null_corr_array = _compute_corr(null_means_array, broderick_broadcasted,
+                                    method=corr_method, axis=1)
 
     # Create output based on metric parameter
     if metric == 'mse':
